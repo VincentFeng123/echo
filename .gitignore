@@ -5,7 +5,6 @@ edge-match/
 template3.html
 echo.html
 round-play.json
-build.mjs
 shot.cjs
 dbg.cjs
 revealtest.cjs
@@ -13,4 +12,5 @@ webcamtest.cjs
 shelftest.cjs
 img/vega.b64
 node_modules/
+dist/
 .DS_Store
