@@ -1,0 +1,12 @@
+{
+  "name": "echo",
+  "private": true,
+  "type": "module",
+  "description": "Echo: guess the missing word in five real rabbit holes a day, on an old TV.",
+  "scripts": {
+    "start": "node serve.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

@@ -1,0 +1,16 @@
+# local test output and scratch
+shots/
+edge-match/
+*.before-*.html
+template3.html
+echo.html
+round-play.json
+build.mjs
+shot.cjs
+dbg.cjs
+revealtest.cjs
+webcamtest.cjs
+shelftest.cjs
+img/vega.b64
+node_modules/
+.DS_Store
