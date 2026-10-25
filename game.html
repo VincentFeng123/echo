@@ -48,13 +48,23 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
 (function () {
   "use strict";
   var DATA = JSON.parse(document.getElementById("tape-data").textContent);
+  var BROAD_PAGES = {}; (DATA.broad || []).forEach(function (t) { BROAD_PAGES[t] = 1; });
   var ABOUT = {}; DATA.tapes.forEach(function (p) { Object.keys(p.about || {}).forEach(function (t) { ABOUT[t] = p.about[t]; }); });
   var ROUNDS = DATA.tapes.map(function (p, i) { return { slug: p.slug, start: p.start, target: p.target, par: p.par, hole: p.hole, near: p.near || [], level: p.level || "", ink: p.ink || "", lamp: {} }; });
   var RI = 0, R = ROUNDS[0];
   var SHARE_URL = "__SHARE_URL__"; if (SHARE_URL === "auto") SHARE_URL = location.origin + location.pathname;
   var NAME = "No Clicking";
   var ARCHIVE = "__ARCHIVE__" === "on"; // the ARCHIVE tab shows only where the desk game is served (page.mjs decides)
-  var EJECT = 5; // strokes over par before the tape ejects and plays the rabbit's route
+  var EJECT = 5; // strokes over par before the tape ejects and plays the rabbit's route (set by the mode)
+  // three ways to play the same tapes; the player picks, and each mode keeps its own progress and leaderboard
+  var MODES = {
+    easy: { name: "EASY", eject: 5, broadList: false, strictNames: false, names: true, ai: true, broadCost: 0 },
+    medium: { name: "MEDIUM", eject: 5, broadList: true, strictNames: true, names: true, ai: true, broadCost: 0 },
+    hard: { name: "HARD", eject: 3, broadList: true, strictNames: true, names: false, ai: false, broadCost: 1 }
+  };
+  var MODE = "medium"; try { var m0 = localStorage.getItem("wr-noclick-mode"); if (MODES[m0]) MODE = m0; } catch (e) {}
+  function rules() { return MODES[MODE]; }
+  EJECT = rules().eject;
   var STORE = "";
   var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var BX = 3.4, BY = 2.9; // tube curvature (smaller = more bent); set per shape in resize()
@@ -121,25 +131,27 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   // does this text name the page: its title, its title without "(...)", or one of its redirects?
   function names(txt, p) {
     var cands = [p.title, baseTitle(p.title)].concat(p.aliases.slice(0, 48));
-    for (var i = 0; i < cands.length; i++) { var n = cands[i]; if (n.length >= 4 && new RegExp("(^|[^A-Za-z0-9])" + esc(n) + "(?![A-Za-z0-9])", "i").test(txt)) return n; }
+    // a one-word name counts only written as a name ("Germany"), not as an ordinary word ("music")
+    for (var i = 0; i < cands.length; i++) { var n = cands[i]; if (n.length >= 4 && new RegExp("(^|[^A-Za-z0-9])" + esc(n) + "(?![A-Za-z0-9])", n.indexOf(" ") >= 0 || !rules().strictNames ? "i" : "").test(txt)) return n; }
     return null;
   }
   // The AI backup referee (noclick/judge.mjs behind /api/judge): asked only when Wikipedia doesn't tie two pages
   // together, or can't be reached. Resolves to { related, why }, or null when there's no referee to ask.
   var AI_OFF = false;
   function aiJudge(a, b, aDesc, bDesc) {
-    var k = "a:" + a + "|" + b;
+    var k = "a:" + MODE + ":" + a + "|" + b;
     if (PAGES[k] !== undefined) return Promise.resolve(PAGES[k]);
     if (AI_OFF) return Promise.resolve(null);
     if (ui.busy && !ui.busy.quiet) { ui.busy.ai = true; ui.dirty = true; kick(); }
-    return fetch("/api/judge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ a: a, b: b, aDesc: aDesc || "", bDesc: bDesc || "" }) })
+    return fetch("/api/judge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ a: a, b: b, aDesc: aDesc || "", bDesc: bDesc || "", mode: MODE }) })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) { if (j && j.off) AI_OFF = true; var v = j && typeof j.related === "boolean" ? { related: j.related, why: j.why || "" } : null; if (v) PAGES[k] = v; return v; }, function () { return null; });
   }
   // a step from a to b counts when either page links the other, or one names the other in its text
   // (and, failing both, when the AI referee sees a clear connection)
-  function connect(a, b) {
-    var k = "c:" + a.title + "|" + b.title;
+  // (opt.wikiOnly: Wikipedia's word only, for the step into the target and the END lamp)
+  function connect(a, b, opt) {
+    var wikiOnly = !!(opt && opt.wikiOnly), k = "c:" + MODE + ":" + a.title + "|" + b.title + (wikiOnly ? "|w" : "");
     if (PAGES[k] !== undefined) return Promise.resolve(PAGES[k]);
     var pl = [a.title, b.title].concat(a.aliases.slice(0, 24), b.aliases.slice(0, 24)).slice(0, 50);
     return wiki({ prop: "links", titles: a.title + "|" + b.title, pltitles: pl.join("|"), pllimit: "max" }).then(function (j) {
@@ -148,9 +160,11 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       var isB = function (t) { return t === b.title || b.aliases.indexOf(t) >= 0; }, isA = function (t) { return t === a.title || a.aliases.indexOf(t) >= 0; };
       if ((got[a.title] || []).some(isB)) return { how: "link" };
       if ((got[b.title] || []).some(isA)) return { how: "back" };
+      if (!rules().names) return null; // Hard mode: real links only
       return Promise.all([textOf(a.title), textOf(b.title)]).then(function (tx) {
         var n = names(tx[0], b); if (n) return { how: "names", n: n };
         n = names(tx[1], a); if (n) return { how: "named", n: n };
+        if (wikiOnly || !rules().ai) return null;
         return aiJudge(a.title, b.title, a.desc, b.desc).then(function (v) { return v && v.related ? { how: "ai", n: v.why } : null; });
       });
     }).then(function (r) { PAGES[k] = r; return r; });
@@ -161,6 +175,8 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       var key = norm(baseTitle(d.title)), all = (j.query && j.query.pages || []).filter(function (p) { return !p.missing; }).map(function (p) { return p.title; });
       var senses = all.filter(function (t) { var n = norm(t); return n === key || n.indexOf(key + " ") === 0 || norm(baseTitle(t)) === key; }).slice(0, 20);
       if (!senses.length) return { kind: "dym", opts: all.slice(0, 3) };
+      var specific = senses.filter(function (t) { return !tooBroad(t); });
+      if (specific.length) senses = specific;
       var pl = [cur.title].concat(senses).slice(0, 50);
       return wiki({ prop: "links", titles: pl.join("|"), pltitles: pl.join("|"), pllimit: "max" }).then(function (lj) {
         var linked = {};
@@ -180,6 +196,8 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   var MONTHS = "january|february|march|april|may|june|july|august|september|october|november|december";
   var BROAD_RE = new RegExp("^(\\d{1,4}s?( (bc|bce|ad|ce))?|\\d{1,2}(st|nd|rd|th) (century|millennium)( bc)?|(" + MONTHS + ")( \\d{1,2})?|\\d{1,2} (" + MONTHS + ")|\\d{4} in .+|.+ in \\d{4}s?|(list|lists|timeline|outline|index|glossary) of .+)$");
   function looksBroad(s) { return BROAD_RE.test(norm(s)); }
+  // umbrella topics (Music, Film, Food, a country...) connect to everything, so they aren't steps; this tape's own pages are
+  function tooBroad(title) { return rules().broadList && !!BROAD_PAGES[title] && title !== R.start && title !== R.target && !R.hole.route.some(function (h) { return h.t === title; }); }
   function fresh() { return { log: [], path: [R.start], tried: {}, tracked: {}, strokes: 0, done: false, solved: false, ejected: false }; }
   // what you're standing on, as a page record (its redirects matter for the checks)
   function curPage(st) { var t = here(st); return PAGES["t:" + norm(t)] ? Promise.resolve(PAGES["t:" + norm(t)]) : resolve(t); }
@@ -200,21 +218,24 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       return (b.dab ? pickSense(b, a, raw) : Promise.resolve(b)).then(function (p) {
         if (p.kind) return p;
         if (p.title === cur) return { free: "You're on " + cur + " already. Type something connected to it." };
-        if (looksBroad(p.title)) return { kind: "broad", g: raw, to: p.title };
+        if (looksBroad(p.title) || tooBroad(p.title)) return { kind: "broad", g: raw, to: p.title };
         if (st.path.indexOf(p.title) >= 0) return { free: "You've been on " + p.title + " already. REWIND goes back for free." };
-        return connect(a, p).then(function (c) {
+        // the step into the target has to be a real Wikipedia link or name: association alone would make every tape one move
+        var last = p.title === R.target;
+        return connect(a, p, { wikiOnly: last }).then(function (c) {
           var read = norm(p.title) !== norm(raw) && norm(baseTitle(p.title)) !== norm(raw) ? p.title : "";
-          return c ? { kind: "move", to: p.title, how: c.how, n: c.n || "", read: read } : { kind: "static", to: p.title, read: read };
+          return c ? { kind: "move", to: p.title, how: c.how, n: c.n || "", read: read } : { kind: "static", to: p.title, read: read, last: last };
         });
       });
     });
   }
   function checkEject(st) { if (!st.done && st.strokes >= R.par + EJECT) { st.done = true; st.ejected = true; } }
   function record(res, raw, st) {
-    var cur = here(st), r = { kind: res.kind, g: raw, at: cur, to: res.to || "", how: res.how || "", n: res.n || "", read: res.read || "", opts: res.opts || null, none: !!res.none };
+    var cur = here(st), r = { kind: res.kind, g: raw, at: cur, to: res.to || "", how: res.how || "", n: res.n || "", read: res.read || "", opts: res.opts || null, none: !!res.none, last: !!res.last };
     if (r.kind === "static" || r.kind === "broad") st.tried[cur + "|" + norm(raw)] = 1;
     if (r.kind === "move") { st.path.push(r.to); st.strokes++; if (r.to === R.target) { st.done = true; st.solved = true; } }
     if (r.kind === "static") st.strokes++;
+    if (r.kind === "broad" && rules().broadCost) { st.strokes += rules().broadCost; r.cost = rules().broadCost; } // Hard mode
     st.log.push(r); checkEject(st);
     return r;
   }
@@ -228,7 +249,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   function track(st) {
     var cur = here(st);
     if (st.tracked[cur]) return Promise.resolve({ again: st.tracked[cur] });
-    var near = {}; R.near.forEach(function (t, i) { near[t] = i + 1; });
+    var near = {}; R.near.forEach(function (t, i) { if (!tooBroad(t)) near[t] = i + 1; });
     var linked = [];
     function page(cont) {
       var q = { generator: "links", titles: cur, gpllimit: "max", gplnamespace: 0, redirects: 1 };
@@ -240,7 +261,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     }
     return page(null).then(function () {
       linked.sort(function (x, y) { return near[x] - near[y]; });
-      var via = linked[0] || "", far = via ? "" : (R.near.filter(function (t) { return st.path.indexOf(t) < 0; })[0] || "");
+      var via = linked[0] || "", far = via ? "" : (R.near.filter(function (t) { return st.path.indexOf(t) < 0 && !tooBroad(t); })[0] || "");
       return { kind: "track", at: cur, via: via, far: far };
     });
   }
@@ -252,8 +273,17 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   // ?reset wipes this device's progress so a tester can play today's tapes again
   if (/[?&]reset\b/.test(location.search)) { try { Object.keys(localStorage).forEach(function (k) { if (k.indexOf("wr-noclick:") === 0) localStorage.removeItem(k); }); history.replaceState(null, "", location.pathname); } catch (e) {} }
   var STATES = [], ST = null;
-  function useRound(i) { RI = Math.max(0, Math.min(ROUNDS.length - 1, i)); R = ROUNDS[RI]; STORE = "wr-noclick:v2:" + DATA.date + ":" + R.slug; if (!STATES[RI]) STATES[RI] = build(); ST = STATES[RI]; }
+  function useRound(i) { RI = Math.max(0, Math.min(ROUNDS.length - 1, i)); R = ROUNDS[RI]; STORE = "wr-noclick:v2:" + DATA.date + ":" + (MODE === "medium" ? "" : MODE + ":") + R.slug; if (!STATES[RI]) STATES[RI] = build(); ST = STATES[RI]; }
   for (var ri0 = 0; ri0 < ROUNDS.length; ri0++) useRound(ri0);
+  // switching mode: that mode's own progress, lamps and leaderboard
+  function setMode(m) {
+    if (!MODES[m] || m === MODE) return;
+    MODE = m; EJECT = rules().eject;
+    try { localStorage.setItem("wr-noclick-mode", m); } catch (e) {}
+    STATES = []; ROUNDS.forEach(function (r) { r.lamp = {}; });
+    for (var i = 0; i < ROUNDS.length; i++) useRound(i);
+    useRound(focus); BOARD.state = "idle"; ui.tip = null; flash(); ui.dirty = true; kick();
+  }
   // golf: strokes against the rabbit's route (E = even); a tape that ejects counts as par + 6
   function score(st, r) { return !st || !st.done ? null : st.solved ? st.strokes - r.par : EJECT + 1; }
   function golf(n) { return n === null ? "–" : n === 0 ? "E" : n > 0 ? "+" + n : "−" + (-n); }
@@ -274,7 +304,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
 
   /* ================= tapes and their covers ================= */
   var INKS = ["#8d8650", "#b8321f", "#6a4fd0", "#3a4fd6", "#e6dcae"];
-  var LEVELS = ["EASY", "MEDIUM", "HARD"];
+  var LEVELS = ["WARM-UP", "MIDDLE", "FINALE"]; // the tapes' order in the day (Easy, Medium and Hard are modes)
   var TAPES = ROUNDS.map(function (r, i) { return { id: "r" + i, ri: i, ink: r.ink || INKS[i % INKS.length], start: r.start, target: r.target, par: r.par, level: r.level || LEVELS[i] || "", no: "No. " + (i + 1) }; });
   var TODAY = RI, focus = TODAY;
   // keep f+i and f+l as separate letters in any pixel font that would join them into one glyph
@@ -432,13 +462,16 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     { k: "par", re: /\bpar\b/i, d: "How many steps the real rabbit hole took. Finish in fewer strokes and you beat the rabbit." },
     { k: "stroke", re: /\bstrokes?\b/i, d: "Each step costs one, and so does each miss and each TRACKING. Fewer is better, like golf." },
     { k: "static", re: /\bstatic\b/i, d: "A guess that doesn't connect to the page you're on. It costs a stroke." },
-    { k: "referee", re: /\breferee\b/i, d: "A small AI that judges a step Wikipedia doesn't settle: would most people see a clear connection between the two?" },
+    { k: "referee", re: /\breferee\b/i, d: "A small AI that judges a step Wikipedia doesn't settle: would most people see a clear, specific connection? It never judges the last step into the target." },
     { k: "by association", re: /\bby association\b/i, d: "Wikipedia doesn't link the two pages, but the referee says most people would see the connection." },
     { k: "TRACKING", re: /\btracking\b/i, d: "Costs a stroke. Names a page linked from here that's one step from the target." },
     { k: "REWIND", re: /\brewind\b/i, d: "Steps back one page for free. Strokes already spent stay spent." },
-    { k: "too broad", re: /\btoo broad\b/i, d: "Years, dates and lists connect to almost everything, so they don't count. No stroke." },
+    { k: "too broad", re: /\btoo broad\b/i, d: "Topics that connect to almost everything don't count. Years, dates and lists always; in Medium and Hard also Wikipedia's ~1,000 core subjects (Music, Film, Food, Science...) and countries. Free, except in Hard mode." },
     { k: "not found", re: /\bnot found\b/i, d: "No Wikipedia page goes by that name. It's free: try another name for it." },
-    { k: "eject", re: /\beject(s|ed)?\b/i, d: "Use par + 5 strokes without reaching the target and the tape ejects and plays the rabbit's route." },
+    { k: "eject", re: /\beject(s|ed)?\b/i, d: "Run out of strokes without reaching the target (par + 5, or par + 3 in Hard mode) and the tape ejects and plays the rabbit's route." },
+    { k: "Easy mode", re: /\beasy mode\b/i, d: "Big topics count (music, film, a country), names count however they're written, and the referee is generous. Only years, dates and lists are too broad." },
+    { k: "Medium mode", re: /\bmedium mode\b/i, d: "Be specific: umbrella topics are too broad (free), a one-word name only counts written as a name, and the referee wants a specific connection." },
+    { k: "Hard mode", re: /\bhard mode\b/i, d: "Real links only: the pages have to link each other. No names, no referee. A too-broad guess costs a stroke, and the tape ejects at par + 3." },
     { k: "rabbit hole", re: /\brabbit hole\b/i, d: "A trail of Wikipedia pages someone on White Rabbit really followed. Each tape is made from one." }
   ];
   // the Wikipedia pages this tape has put on screen: they explain themselves too ("Oramics: a drawn sound technique…")
@@ -513,9 +546,11 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     var tg = title(R.target), st = title(R.start);
     var body = [
       "Get from " + st + " to " + tg + ", one connection at a time. Nothing to click: type anything.",
-      "• A step counts when its Wikipedia page and the one you're on link or name each other, or when the referee sees a clear connection: nutmeg → nuts → squirrel → animal.",
+      "You're in " + MODES[MODE].name.charAt(0) + MODES[MODE].name.slice(1).toLowerCase() + " mode. Switch modes on the tape shelf; each keeps its own progress and leaderboard.",
+      MODE === "hard" ? "• A step counts only when one Wikipedia page links the other: no names, no referee." : "• A step counts when its Wikipedia page and the one you're on link or name each other, or when the referee sees a " + (MODE === "easy" ? "clear connection: nutmeg → nuts → squirrel → animal." : "clear, specific connection: nutmeg → nuts → squirrel → acorn."),
       "• Each step is a stroke. Par is " + R.par + ", the steps the real rabbit hole took. Fewer strokes beats the rabbit.",
-      "• A guess that connects nothing is static and costs a stroke too. Names Wikipedia doesn't know, and years, dates and lists (too broad), are free.",
+      (MODE === "easy" ? "• Big topics like music, film or a country are fine here; only years, dates and lists are too broad." : "• Be specific: umbrella topics like music, film, food or a country are too broad and don't count" + (MODE === "hard" ? ", and in Hard mode they cost a stroke." : " (free, but no help).")) + " A guess that connects nothing is static and costs a stroke. Names Wikipedia doesn't know are free.",
+      MODE === "hard" ? "• Run out of strokes at par + 3 and the tape ejects." : "• The last step into " + tg + " has to be a real Wikipedia link or name; the referee's associations don't count for it.",
       "• Stuck? TRACKING (+1 stroke) names a page that leads toward " + tg + ". REWIND steps back a page for free.",
       "• The END lamp lights on a page that connects to " + tg + "; the RABBIT lamp on a page of the real rabbit hole.",
       "Underlined words explain themselves: hover or tap them."
@@ -601,6 +636,16 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       X.save(); X.setLineDash([2, 3]); X.strokeStyle = "rgba(214,211,203,.4)"; X.lineWidth = 1.2; X.beginPath(); X.moveTo(W / 2 - w / 2, ly + k * (dsz + 8) + 5); X.lineTo(W / 2 + w / 2, ly + k * (dsz + 8) + 5); X.stroke(); X.restore();
     });
     hit("today", W / 2 - lw / 2 - 8, ly - dsz - 4, lw + 16, dsz + 16 + (lines.length - 1) * (dsz + 8), "button", { label: "Today's score and leaderboard", onClick: openScores });
+    // the mode, for all three tapes: Easy, Medium or Hard (each keeps its own progress and leaderboard)
+    var mtop = ly + (lines.length - 1) * (dsz + 8) + (narrow ? 16 : 20), ps = narrow ? 17 : 19, ph = ps + 16, pg = 8, mlab = "MODE";
+    var mws = ["easy", "medium", "hard"].map(function (m) { return W_(MODES[m].name, ps, FF.vcr) + 30; }), mlw = W_(mlab, ps, FF.vcr) + 14;
+    var mx0 = W / 2 - (mlw + mws[0] + mws[1] + mws[2] + pg * 2) / 2;
+    T(mlab, mx0, mtop + ph * .7, { size: ps, color: COL.faint, glow: 0 }); mx0 += mlw;
+    ["easy", "medium", "hard"].forEach(function (m, i) {
+      var nm = MODES[m].name, label = nm.charAt(0) + nm.slice(1).toLowerCase() + " mode";
+      button("mode-" + m, nm, mx0, mtop, mws[i], ph, { primary: m === MODE, size: ps, onClick: function () { setMode(m); }, label: label + (m === MODE ? ", on" : ""), term: label });
+      mx0 += mws[i] + pg;
+    });
     var line = fst.done ? (fst.solved ? "IN " + fst.strokes + " · PAR " + r.par + " · " + golf(score(fst, r)) : "EJECTED · " + golf(score(fst, r))) : (t.start + " → " + t.target).toUpperCase() + " · PAR " + r.par;
     font(cs, FF.vcr); if (X.measureText(line).width > W - mx * 2) line = fst.done ? line : "PAR " + r.par + " · MAKE YOUR OWN TRAIL";
     T(line, W / 2, cy + cs * 1.2, { size: cs, color: COL.white, align: "center" });
@@ -630,7 +675,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     var W = ui.W, H = ui.H, narrow = W < 760, mx = W * (narrow ? .09 : .085), my = H * (narrow ? .065 : .08) + ui.safeT;
     var hy = my + 18, hs = narrow ? 21 : 24;
     var bw = T("◀ TAPES", mx, hy, { size: hs }); hit("back", mx - 6, hy - hs, bw + 12, hs + 10, "button", { label: "Back to the tapes", onClick: backToShelf });
-    if (!narrow) T("TAPE " + (RI + 1) + " OF " + ROUNDS.length + " · " + (TAPES[RI].level || ""), W / 2, hy, { size: hs, color: COL.white, align: "center" });
+    if (!narrow) T("TAPE " + (RI + 1) + " OF " + ROUNDS.length + " · " + rules().name + " MODE", W / 2, hy, { size: hs, color: COL.white, align: "center", terms: true, fixed: true });
     var ct = ST.done ? (ST.solved ? "IN " + ST.strokes + " · " + golfName(score(ST, R)) : "EJECTED") : "STROKES " + ST.strokes + " · PAR " + R.par;
     var cw = W_(ct, hs, FF.vcr); T(ct, W - mx - cw, hy, { size: hs, terms: true, fixed: true });
     var bottom = H - my * .6 - ui.safeB;
@@ -667,7 +712,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     ui.cols = { split: divX }; ui.clip = [splitTop, bottom];
   }
   function drawHead(x, y, w, narrow) {
-    var ks = narrow ? 17 : 18, chip = narrow ? "TAPE " + (RI + 1) + " OF " + ROUNDS.length + " · " + (TAPES[RI].level || "") : "FROM THE LIBRARY", chipW = W_(chip, ks, FF.vcr) + 14;
+    var ks = narrow ? 17 : 18, chip = narrow ? "TAPE " + (RI + 1) + " OF " + ROUNDS.length + " · " + rules().name : "FROM THE LIBRARY", chipW = W_(chip, ks, FF.vcr) + 14;
     X.strokeStyle = COL.rose; X.lineWidth = 1.5; X.strokeRect(x + .75, y + .75, chipW - 1.5, ks + 8);
     T(chip, x + 7, y + ks + 2, { size: ks, color: COL.rose });
     var hl = "? HOW TO PLAY", hw = W_(hl, ks, FF.vcr);
@@ -686,7 +731,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     return y + 36;
   }
   function kindName(r) {
-    return r.kind === "move" ? (r.to === R.target ? "REACHED · +1" : "MOVE · +1") : r.kind === "broad" ? "TOO BROAD · FREE" : r.kind === "dym" ? (r.none ? "NOT FOUND · FREE" : "WHICH ONE? · FREE") : r.kind === "track" ? "TRACKING · +1" : r.kind === "rewind" ? "REWOUND · FREE" : "STATIC · +1";
+    return r.kind === "move" ? (r.to === R.target ? "REACHED · +1" : "MOVE · +1") : r.kind === "broad" ? (r.cost ? "TOO BROAD · +1" : "TOO BROAD · FREE") : r.kind === "dym" ? (r.none ? "NOT FOUND · FREE" : "WHICH ONE? · FREE") : r.kind === "track" ? "TRACKING · +1" : r.kind === "rewind" ? "REWOUND · FREE" : "STATIC · +1";
   }
   function kindShort(k) { return k === "move" ? "MOVE" : k === "broad" ? "TOO BROAD" : k === "dym" ? "WHICH?" : k === "track" ? "TRACKING" : k === "rewind" ? "REWIND" : "STATIC"; }
   // how a step connects, in words: "Squirrel's page links Nut"
@@ -702,10 +747,12 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       if (onHole(r.to)) s += " The RABBIT lamp is on: " + r.to + " is a page of the real rabbit hole.";
       return s;
     }
-    if (r.kind === "broad") return "“" + r.g + "” is too broad: years, dates and lists connect to everything, so they don't count. No stroke.";
+    if (r.kind === "broad") return (r.to && norm(r.to) !== norm(r.g) ? "“" + r.g + "” means " + r.to + ", which" : "“" + r.g + "”") + " is too broad: big umbrella topics (music, film, food, a country...), years and lists connect to everything. Be more specific. " + (r.cost ? "In Hard mode that costs a stroke." : "No stroke.");
     if (r.kind === "dym") return r.none ? "Couldn't find a Wikipedia page for “" + r.g + "”." + (r.opts.length ? " Did you mean " + r.opts.join(", ") + "?" : " Try another name for it.") + " No stroke." : "Which one? “" + r.g + "” could be " + r.opts.join(", ") + ", and none of them connects to " + at + ". Try one by its full name. No stroke.";
     if (r.kind === "track") return r.via ? at + "'s page links " + r.via + ", and " + r.via + " is one step from " + tg + "." : r.far ? "Nothing " + at + " links is one step from " + tg + ". But " + r.far + " is. Find your way there." : "No track from here. REWIND is free.";
     if (r.kind === "rewind") return "Back on " + at + ". No stroke.";
+    if (MODE === "hard") return "Neither page links the other: " + at + " and " + (r.to || "“" + r.g + "”") + ". In Hard mode only real links count. One stroke.";
+    if (r.last) return "Wikipedia doesn't tie " + at + " to " + tg + ". The last step into the target has to be a real link or name, not just an association. One stroke.";
     return "Wikipedia doesn't tie " + at + " to " + (r.to || "“" + r.g + "”") + ", and the referee doesn't see a clear connection either. One stroke.";
   }
   function lamp(x, y, on, label) {
@@ -943,7 +990,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   function postedName() { try { return localStorage.getItem("wr-noclick:posted:" + DATA.date) || ""; } catch (e) { return ""; } }
   function fetchBoard() {
     BOARD.state = "loading"; ui.dirty = true; kick();
-    fetch("/api/board?date=" + encodeURIComponent(DATA.date) + "&device=" + encodeURIComponent(deviceId())).then(function (r) {
+    fetch("/api/board?date=" + encodeURIComponent(DATA.date) + "&mode=" + MODE + "&device=" + encodeURIComponent(deviceId())).then(function (r) {
       if (r.status === 503) { BOARD.state = "setup"; return null; }
       if (!r.ok) throw new Error(r.status); return r.json();
     }).then(function (j) { if (j && j.setup) BOARD.state = "setup"; else if (j) { BOARD.entries = j.entries || []; BOARD.you = BOARD.entries.filter(function (e) { return e.mine; })[0] || null; BOARD.state = "ok"; } ui.dirty = true; kick(); },
@@ -954,7 +1001,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     if (name.length < 2) { BOARD.err = "Type a name of 2 to 16 letters first."; ui.dirty = true; kick(); return; }
     if (!dayTotals().all || BOARD.state === "posting") return;
     BOARD.err = ""; BOARD.state = "posting"; ui.dirty = true; kick();
-    var body = { date: DATA.date, device: deviceId(), name: name, tapes: ROUNDS.map(function (r, i) { var st = STATES[i]; return { slug: r.slug, par: r.par, strokes: strokesOf(st, r), solved: st.solved }; }) };
+    var body = { date: DATA.date, mode: MODE, device: deviceId(), name: name, tapes: ROUNDS.map(function (r, i) { var st = STATES[i]; return { slug: r.slug, par: r.par, strokes: strokesOf(st, r), solved: st.solved }; }) };
     fetch("/api/board", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then(function (r) {
       if (r.status === 503) { BOARD.state = "setup"; return null; }
       return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || r.status); return j; });
@@ -962,7 +1009,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       if (j && j.setup) BOARD.state = "setup";
       else if (j) {
         BOARD.entries = j.entries || []; BOARD.you = j.you || null; BOARD.state = "ok";
-        try { localStorage.setItem("wr-noclick-name", name); localStorage.setItem("wr-noclick:posted:" + DATA.date, name); } catch (e) {}
+        try { localStorage.setItem("wr-noclick-name", name); localStorage.setItem("wr-noclick:posted:" + DATA.date + ":" + MODE, name); } catch (e) {}
         ui.nameText = undefined; ui.editName = false;
         if (hitEls.name) hitEls.name.blur();
       }
@@ -1007,11 +1054,11 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     var hy = my + 18, hs = narrow ? 21 : 24, t = dayTotals();
     var bw = T("◀ TAPES", mx, hy, { size: hs }); hit("back", mx - 6, hy - hs, bw + 12, hs + 10, "button", { label: "Back to the tapes", onClick: backToShelf });
     var day = new Date(DATA.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }).toUpperCase();
-    var ht = (narrow ? "" : NAME.toUpperCase() + " #" + (DATA.day || 1) + " · ") + day;
+    var ht = (narrow ? "" : NAME.toUpperCase() + " #" + (DATA.day || 1) + " · ") + rules().name + " · " + day;
     var htw = W_(ht, hs, FF.vcr); T(ht, W - mx - htw, hy, { size: hs, color: COL.white });
     var bottom = H - my * .6 - ui.safeB;
     function yours(x, y, w) {
-      y = drawSection("TODAY'S SCORE", x, y, w);
+      y = drawSection("TODAY'S SCORE · " + rules().name + " MODE", x, y, w);
       var big = t.done ? golf(t.score) : "–";
       var bigW = T(big, x, y + 56, { size: 70, color: t.done ? scoreColor(t.score) : COL.faint, glow: 6 });
       var line = t.done ? t.strokes + " STROKES · PAR " + (t.all ? t.allPar : t.par) + (t.all ? " · ALL " + ROUNDS.length + " TAPES" : " · " + t.done + " OF " + ROUNDS.length + " TAPES") : "NO TAPES FINISHED YET";
@@ -1027,7 +1074,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       return y;
     }
     function board(x, y, w) {
-      y = drawSection("LEADERBOARD · TODAY", x, y, w);
+      y = drawSection("LEADERBOARD · " + rules().name + " · TODAY", x, y, w);
       return drawBoard(x, y, w, narrow);
     }
     if (narrow) {
@@ -1387,7 +1434,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     var r = R;
     if (r.lamp[t] !== undefined || t === r.target) return;
     r.lamp[t] = null;
-    Promise.all([resolve(t), resolve(r.target)]).then(function (p) { return connect(p[0], p[1]); }).then(function (c) { r.lamp[t] = !!c; ui.dirty = true; kick(); }, function () { delete r.lamp[t]; });
+    Promise.all([resolve(t), resolve(r.target)]).then(function (p) { return connect(p[0], p[1], { wikiOnly: true }); }).then(function (c) { r.lamp[t] = !!c; ui.dirty = true; kick(); }, function () { delete r.lamp[t]; });
   }
   function doTrack() {
     if (ui.busy || ST.done) return;
@@ -1417,8 +1464,9 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     if (pre) { clear(); return after(record(pre, val, st)); }
     ui.busy = { g: val, t0: Date.now() }; ui.free = ""; ui.dirty = true; kick();
     judge(val, st).catch(function () {
-      // Wikipedia didn't answer: the AI referee judges the names as typed
+      // Wikipedia didn't answer: the AI referee judges the names as typed (not in Hard mode, which has no referee)
       var cur = here(st);
+      if (!rules().ai) throw new Error("no signal");
       return aiJudge(cur, val, "", "").then(function (v) {
         if (!v) throw new Error("no signal");
         var name = val.charAt(0).toUpperCase() + val.slice(1);
@@ -1441,7 +1489,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       return (i + 1) + ". " + r.start + " ··· " + r.target + "\n" + (sq || "·") + (st.done ? "  " + (st.solved ? st.strokes + " (" + golf(score(st, r)) + ")" : "ejected (" + golf(score(st, r)) + ")") : "");
     });
     var dt = dayTotals();
-    var text = NAME + " #" + (DATA.day || 1) + " · " + day + "\n" + (dt.done ? "Today: " + dt.strokes + " strokes, par " + dt.par + " (" + golf(dt.score) + ")" + (dt.all ? "" : ", " + dt.done + " of " + ROUNDS.length + " tapes") : "Today: no tapes finished yet") + "\n" + rows.join("\n") + "\n" + SHARE_URL;
+    var text = NAME + " #" + (DATA.day || 1) + " · " + MODES[MODE].name.charAt(0) + MODES[MODE].name.slice(1).toLowerCase() + " mode · " + day + "\n" + (dt.done ? "Today: " + dt.strokes + " strokes, par " + dt.par + " (" + golf(dt.score) + ")" + (dt.all ? "" : ", " + dt.done + " of " + ROUNDS.length + " tapes") : "Today: no tapes finished yet") + "\n" + rows.join("\n") + "\n" + SHARE_URL;
     var ok = function () { ui.copied = "COPIED. PASTE IT IN A CHAT."; ui.dirty = true; kick(); };
     var fail = function () {
       var ta = document.createElement("textarea"); ta.className = "sharebox"; ta.value = text; ta.readOnly = true; $("screen").appendChild(ta); ta.focus(); ta.select();

@@ -15,6 +15,8 @@ function setting(name) {
 }
 
 const SYSTEM = `You referee a word-association game played with Wikipedia pages. The player is on page A and names page B as the next step. Say whether B is directly related to A: would a typical person see a clear, specific connection between the two (one is part of, a kind of, made of, made by, used for, found in, famous for, named after the other; a person, place, event or thing closely tied to it)? Common-sense associations count, like nuts and squirrels, or pigeons and New York. Links that could join almost anything don't (both are foods, both are from the same country, both are old). Answer in JSON: related, and why in at most 12 plain words.`;
+// Medium mode adds this: specific connections only
+const STRICT = ` Be strict about specificity: say no when either page is a broad field or umbrella category (music, film, food, science, technology, animals, a country), or when the only link is that one belongs to the other's broad category (a theme tune and "music").`;
 const SCHEMA = {
   type: 'object', additionalProperties: false, required: ['related', 'why'],
   properties: { related: { type: 'boolean' }, why: { type: 'string' } },
@@ -22,11 +24,12 @@ const SCHEMA = {
 
 const cache = new Map();
 const recent = new Map(); // ip -> [timestamps], a light cap so a public deploy can't be used as a free model
-export async function judgeStep({ a, b, aDesc = '', bDesc = '' }, ip = '') {
+export async function judgeStep({ a, b, aDesc = '', bDesc = '', mode = 'medium' }, ip = '') {
   const clip = s => String(s || '').replace(/\s+/g, ' ').trim().slice(0, 160);
   a = clip(a); b = clip(b); aDesc = clip(aDesc); bDesc = clip(bDesc);
   if (!a || !b) return { error: 'missing pages', status: 400 };
-  const key = (a + '|' + b).toLowerCase();
+  const strict = mode !== 'easy';
+  const key = (strict ? 's|' : 'e|') + (a + '|' + b).toLowerCase();
   if (cache.has(key)) return cache.get(key);
   const now = Date.now(), times = (recent.get(ip) || []).filter(t => now - t < 60000);
   if (times.length >= 40) return { error: 'slow down', status: 429 };
@@ -39,7 +42,7 @@ export async function judgeStep({ a, b, aDesc = '', bDesc = '' }, ip = '') {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: 'Bearer ' + apiKey },
     body: JSON.stringify({
-      model, instructions: SYSTEM, input: user, max_output_tokens: 300, reasoning: { effort },
+      model, instructions: SYSTEM + (strict ? STRICT : ''), input: user, max_output_tokens: 300, reasoning: { effort },
       text: { format: { type: 'json_schema', name: 'step', strict: true, schema: SCHEMA } },
     }),
     signal: AbortSignal.timeout(12000),

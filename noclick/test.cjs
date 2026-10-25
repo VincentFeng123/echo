@@ -1,6 +1,6 @@
 // noclick/test.cjs: plays today's No Clicking tapes end to end in headless Chromium, on a 390px phone and a desktop,
-// against live Wikipedia and the AI referee (/api/judge). Tape 1 runs TOO BROAD, WHICH ONE, NOT FOUND, TRACKING, a name
-// found through search ("werthers candy"), MOVE and REWIND, then finishes; tape 2 finishes on the rabbit's own route;
+// against live Wikipedia and the AI referee (/api/judge), in Medium mode, then checks Easy and Hard. Tape 1 runs TOO BROAD (a year, "movies", a country), WHICH ONE,
+// NOT FOUND, TRACKING, a name found through search ("werthers candy"), MOVE and REWIND, then finishes; tape 2 finishes on the rabbit's own route;
 // tape 3 takes STATIC until it ejects.
 // It also checks the end screen's links, share, today's score and the leaderboard (posting as "Test bot", removed after),
 // reload, ?reset and the ARCHIVE tab, and fails on console errors or
@@ -61,12 +61,18 @@ async function run(name, vp, mobile, browser, errors) {
   await btn('Tracking').click({ force: true }); await settle();
   if (await last(0) !== 'track') errors.push(`${name}: TRACKING didn't take`);
   await shot('3-tape1-tracking');
+  // umbrella topics are too broad, whatever they're typed as ("movies" is Film)
+  await expect(0, 'movies', 'broad');
+  await expect(0, 'Germany', 'broad');
   // a name that's neither a title nor a redirect is found through Wikipedia's search
-  for (const g of ['German language', 'Germany', 'werthers candy']) await expect(0, g, 'move');
-  if ((await state())[0].lastTo !== "Werther's Original") errors.push(`${name}: "werthers candy" read as ${(await state())[0].lastTo}`);
+  await expect(0, 'Baking', 'move');
   await shot('4-tape1-moved');
-  for (let i = 0; i < 3; i++) { await btn('Rewind').click({ force: true }); await page.waitForTimeout(200); }
-  if (await last(0) !== 'rewind' || (await state())[0].path.length !== 1) errors.push(`${name}: REWIND didn't take`);
+  const before = (await state())[0].log.length;
+  await type('werthers candy');
+  const s1 = (await state())[0];
+  if (s1.lastTo !== "Werther's Original") errors.push(`${name}: "werthers candy" read as ${s1.lastTo}`);
+  for (let i = 0; i < s1.path.length - 1; i++) { await btn('Rewind').click({ force: true }); await page.waitForTimeout(200); }
+  if ((await state())[0].path.length !== 1) errors.push(`${name}: REWIND didn't take`);
   for (const g of CHECKS[0].route) await expect(0, g.toLowerCase(), 'move');
   let s = (await state())[0];
   if (!s.solved) errors.push(`${name}: tape 1 not solved: ${JSON.stringify(s)}`);
@@ -119,6 +125,24 @@ async function run(name, vp, mobile, browser, errors) {
   await page.waitForTimeout(800); await shot('10-shelf-done');
   await page.goto(URL0 + '?reset'); await waitView('shelf');
   if ((await state()).some(t => t.done || t.strokes)) errors.push(`${name}: ?reset didn't clear`);
+
+  // modes: Easy lets a country through, Hard charges a stroke for it; each mode keeps its own progress
+  const playIn = async (mode, g) => {
+    await btn(mode[0].toUpperCase() + mode.slice(1) + ' mode').click({ force: true }); await page.waitForTimeout(500);
+    await btn('Play tape 1').click({ force: true }); await waitView('play'); await page.waitForTimeout(800);
+    const x = btn('Close how to play'); if (await x.isVisible().catch(() => false)) { await x.click({ force: true }); await page.waitForTimeout(500); }
+    const before = (await state())[0].log.length; await type(g);
+    const s = (await state())[0];
+    await btn('Back to the tapes').click({ force: true }); await waitView('shelf'); await page.waitForTimeout(400);
+    return { kind: s.log.length > before ? s.log[s.log.length - 1] : 'free', strokes: s.strokes };
+  };
+  const easy = await playIn('easy', 'Germany');
+  if (easy.kind === 'broad') errors.push(`${name}: Easy mode called Germany too broad`);
+  const hard = await playIn('hard', 'Germany');
+  if (hard.kind !== 'broad' || hard.strokes !== 1) errors.push(`${name}: Hard mode Germany gave ${JSON.stringify(hard)}`);
+  await btn('Medium mode').click({ force: true }); await page.waitForTimeout(400);
+  if ((await state()).some(t => t.strokes)) errors.push(`${name}: Medium mode didn't keep its own (empty) progress`);
+  await shot('11-modes');
 
   // the ARCHIVE tab switches to /desk (where the desk game is served; elsewhere the tab hides itself)
   await page.waitForTimeout(800);

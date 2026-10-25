@@ -8,6 +8,7 @@ checks that live against Wikipedia (see "the referee" in game.html), so a tape o
   - the target's neighbours (pages one step from it), best known first, for TRACKING.
 
   python3 build_tapes.py [slug ...]     writes puzzles/<slug>.json and puzzles/<slug>.check.json (test guesses)
+  python3 build_tapes.py --broad        writes broad.json, the pages too general to be a step
 """
 import gzip, hashlib, json, os, re, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -67,7 +68,8 @@ def aliases(title):
 def names(txt, title):
     """Does this text name the page (its title, title without "(...)", or one of its redirects)? Same test as the game."""
     for n in [title, base(title)] + aliases(title)[:48]:
-        if len(n) >= 4 and re.search(r"(?<![\w])" + re.escape(n) + r"(?![\w])", txt, re.I):
+        # a one-word name counts only written as a name ("Germany"), not as an ordinary word ("music")
+        if len(n) >= 4 and re.search(r"(?<![\w])" + re.escape(n) + r"(?![\w])", txt, 0 if " " not in n else re.I):
             return n
     return None
 
@@ -219,6 +221,35 @@ def build(slug):
         f"{os.path.getsize(path):,} bytes; {wp.LIVE[0] - live0} live requests; {time.time() - t0:.0f}s")
 
 
+COUNTRIES = "/Users/vincentfeng/whiterabbit/reports/no-clicking-2026-10-22/work/supply/countries.json"
+
+
+def broad_list():
+    """Pages too general to be a step: Wikipedia's ~1,000 core topics ("Vital articles, level 3") minus its famous
+    people, every country, and the continents. Written to broad.json; page.mjs puts it in the page."""
+    j = wp.api(action="query", prop="revisions", titles="Wikipedia:Vital articles/Level/3", rvprop="content", rvslots="main", redirects="1")
+    txt = j["query"]["pages"][0]["revisions"][0]["slots"]["main"]["content"]
+    sec, names_ = None, []
+    for line in txt.split("\n"):
+        m = re.match(r"^(=+)\s*(.*?)\s*\1\s*$", line)
+        if m and len(m.group(1)) == 2:
+            sec = re.sub(r"\(.*?\)", "", re.sub(r"\[\[|\]\]", "", m.group(2))).strip()
+            continue
+        if sec and sec != "People":
+            names_ += [l.strip() for l in re.findall(r"\[\[([^\]|#]+)(?:\|[^\]]*)?\]\]", line) if ":" not in l]
+    names_ += json.load(open(COUNTRIES)) + ["England", "Scotland", "Wales", "Northern Ireland", "Africa", "Asia", "Europe",
+                                            "North America", "South America", "Oceania", "Antarctica", "Australia (continent)"]
+    cm = wp.canon(sorted(set(names_)))
+    titles = sorted({c for c in cm.values() if c})
+    with open(os.path.join(HERE, "broad.json"), "w") as f:
+        json.dump({"source": "Wikipedia:Vital articles/Level 3 without People, plus countries and continents", "built": time.strftime("%Y-%m-%d"),
+                   "titles": titles}, f, ensure_ascii=False, separators=(",", ":"))
+    log("broad.json:", len(titles), "pages too broad to be a step")
+
+
 if __name__ == "__main__":
-    for s in (sys.argv[1:] or list(TAPES)):
-        build(s)
+    if sys.argv[1:2] == ["--broad"]:
+        broad_list()
+    else:
+        for s in (sys.argv[1:] or list(TAPES)):
+            build(s)

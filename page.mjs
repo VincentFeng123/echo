@@ -11,7 +11,10 @@ export function buildPage({ shareUrl = 'auto' } = {}) {
     JSON.parse(raw); // fail loudly on a half-written tape
     return raw;
   });
-  const json = (`{"day":${JSON.stringify(today.day)},"date":${JSON.stringify(today.date)},"tapes":[` + tapes.join(',') + ']}').replace(/<\//g, '<\\/');
+  // pages too general to be a step (noclick/broad.json, from build_tapes.py --broad)
+  const broadFile = new URL('noclick/broad.json', dir);
+  const broad = fs.existsSync(broadFile) ? JSON.stringify(JSON.parse(fs.readFileSync(broadFile, 'utf8')).titles) : '[]';
+  const json = (`{"day":${JSON.stringify(today.day)},"date":${JSON.stringify(today.date)},"broad":${broad},"tapes":[` + tapes.join(',') + ']}').replace(/<\//g, '<\\/');
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n' +
     tpl.replace('__PUZZLES__', () => json).replace('__SHARE_URL__', () => shareUrl)
       .replace('__ARCHIVE__', () => (fs.existsSync(new URL('desk.html', dir)) ? 'on' : 'off')) + '\n</html>'; // ARCHIVE tab only where the desk game is
