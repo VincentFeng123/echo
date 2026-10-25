@@ -107,20 +107,52 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       return wiki({ list: "search", srsearch: text, srwhat: "nearmatch", srlimit: 1, srprop: "" }).then(function (s) {
         var hit = s.query && s.query.search && s.query.search[0];
         if (hit && norm(hit.title) !== norm(text)) return resolve(hit.title).then(function (r) { return (PAGES[k] = r); });
-        // not a title or a redirect ("werthers candy"): Wikipedia's own search, taking the best hit that shares a word
-        return wiki({ list: "search", srsearch: text, srlimit: 5, srprop: "" }).then(function (f) {
-          var hits = (f.query && f.query.search || []).map(function (h) { return h.title; }).filter(function (t) { return sharesWord(text, t) && !looksBroad(t); });
-          if (hits.length) return resolve(hits[0]).then(function (r) { return (PAGES[k] = r); });
-          return { missing: true, suggest: [] };
+        // not a title or a redirect ("werthers candy", "german snack"): Wikipedia's own search results, for pickHit()
+        // to choose from with the page you're on in mind
+        return wiki({ list: "search", srsearch: text, srlimit: 8, srprop: "" }).then(function (f) {
+          var hits = (f.query && f.query.search || []).map(function (h) { return h.title; }).filter(function (t) { return !looksBroad(t) && !tooBroad(t); });
+          return (PAGES[k] = { missing: true, hits: hits, all: hits.filter(function (t) { return sharesWord(text, t, "all"); })[0] || "",
+            first: hits.filter(function (t) { return sharesWord(text, t, "first"); })[0] || "", suggest: hits.slice(0, 3) });
         });
       });
     });
   }
-  // "werthers candy" and "Werther's Original" share "werther": enough to take a search hit as what you meant
-  function sharesWord(q, t) {
+  // does a search hit's title carry the typed words? "all" of them, or the "first" (the name usually comes first:
+  // "werthers candy" is Werther's Original; "german snack" is not Skips (snack), which only shares "snack")
+  function sharesWord(q, t, how) {
     var stem = function (w) { return w.replace(/(es|s)$/, ""); };
-    var qs = norm(q).split(" ").filter(function (w) { return w.length >= 4; }).map(stem), ts = norm(t).split(" ").map(stem);
-    return qs.some(function (a) { return ts.some(function (b) { return b.length >= 4 && (a === b || (a.length >= 5 && b.length >= 5 && a.slice(0, 5) === b.slice(0, 5))); }); });
+    var STOP = { the: 1, and: 1, for: 1, with: 1, from: 1, that: 1, this: 1, its: 1, was: 1, are: 1 };
+    var qs = norm(q).split(" ").filter(function (w) { return w.length >= 3 && !STOP[w]; }).map(stem), ts = norm(t).split(" ").map(stem);
+    var has = function (a) { return ts.some(function (b) { return b.length >= 3 && (a === b || (a.length >= 5 && b.length >= 5 && a.slice(0, 5) === b.slice(0, 5))); }); };
+    if (!qs.length) return false;
+    return how === "first" ? has(qs[0]) : how === "all" ? qs.every(has) : qs.some(has);
+  }
+  // a second look before a miss: does Wikipedia's search for what was typed turn up a page that links, or is linked
+  // from, where you are? ("iron tower" from Paris is the Eiffel Tower, not the page called Iron Tower)
+  function contextHit(text, cur, st) {
+    return wiki({ list: "search", srsearch: text, srlimit: 8, srprop: "" }).then(function (f) {
+      var hits = (f.query && f.query.search || []).map(function (h) { return h.title; }).filter(function (t) { return t !== cur.title && st.path.indexOf(t) < 0 && !looksBroad(t) && !tooBroad(t); });
+      if (!hits.length) return null;
+      return wiki({ prop: "links", titles: [cur.title].concat(hits).join("|"), pltitles: [cur.title].concat(hits).join("|"), pllimit: "max" }).then(function (j) {
+        var how = {};
+        (j.query.pages || []).forEach(function (p) { (p.links || []).forEach(function (l) { if (p.title === cur.title) how[l.title] = how[l.title] || "link"; else if (l.title === cur.title) how[p.title] = how[p.title] || "back"; }); });
+        var t = hits.filter(function (x) { return how[x]; })[0];
+        return t ? { title: t, how: how[t] } : null;
+      });
+    }, function () { return null; });
+  }
+  // a typed description that isn't a page: the search hit that connects to where you are (links it, or is linked
+  // from it), else one that carries all its words, else one that carries its first word; otherwise it's not found
+  function pickHit(m, cur) {
+    var guessed = function (t) { return resolve(t).then(function (p) { var o = {}; Object.keys(p).forEach(function (k) { o[k] = p[k]; }); o.searched = true; return o; }); };
+    var hits = m.hits.filter(function (t) { return t !== cur.title; }).slice(0, 8);
+    var near = hits.length ? wiki({ prop: "links", titles: [cur.title].concat(hits).join("|"), pltitles: [cur.title].concat(hits).join("|"), pllimit: "max" }) : Promise.resolve(null);
+    return near.then(function (j) {
+      var linked = {};
+      ((j && j.query && j.query.pages) || []).forEach(function (p) { (p.links || []).forEach(function (l) { if (p.title === cur.title) linked[l.title] = 1; else if (l.title === cur.title) linked[p.title] = 1; }); });
+      var hit = hits.filter(function (t) { return linked[t]; })[0] || m.all || m.first;
+      return hit ? guessed(hit) : { kind: "dym", none: true, opts: m.suggest };
+    });
   }
   function textOf(t) {
     var k = "x:" + t;
@@ -214,8 +246,9 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     var cur = here(st);
     return Promise.all([curPage(st), resolve(raw)]).then(function (r) {
       var a = r[0], b = r[1];
-      if (b.missing) return { kind: "dym", opts: b.suggest.slice(0, 3), none: true }; // a page we can't find never costs a stroke
-      return (b.dab ? pickSense(b, a, raw) : Promise.resolve(b)).then(function (p) {
+      // a page we can't find never costs a stroke
+      return (b.missing ? pickHit(b, a) : b.dab ? pickSense(b, a, raw) : Promise.resolve(b)).then(function (p) {
+        if (p.missing) return { kind: "dym", opts: [], none: true };
         if (p.kind) return p;
         if (p.title === cur) return { free: "You're on " + cur + " already. Type something connected to it." };
         if (looksBroad(p.title) || tooBroad(p.title)) return { kind: "broad", g: raw, to: p.title };
@@ -224,14 +257,20 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
         var last = p.title === R.target;
         return connect(a, p, { wikiOnly: last }).then(function (c) {
           var read = norm(p.title) !== norm(raw) && norm(baseTitle(p.title)) !== norm(raw) ? p.title : "";
-          return c ? { kind: "move", to: p.title, how: c.how, n: c.n || "", read: read } : { kind: "static", to: p.title, read: read, last: last };
+          if (c) return { kind: "move", to: p.title, how: c.how, n: c.n || "", read: read };
+          // a page we only guessed from a description: if it doesn't connect, the guess may be ours, so no stroke
+          if (p.searched) return { kind: "dym", guess: p.title, to: p.title };
+          // an exact name that misses may still describe something that connects; only a real miss costs a stroke
+          return contextHit(raw, a, st).then(function (h) {
+            return h ? { kind: "move", to: h.title, how: h.how, n: "", read: h.title } : { kind: "static", to: p.title, read: read, last: last };
+          });
         });
       });
     });
   }
   function checkEject(st) { if (!st.done && st.strokes >= R.par + EJECT) { st.done = true; st.ejected = true; } }
   function record(res, raw, st) {
-    var cur = here(st), r = { kind: res.kind, g: raw, at: cur, to: res.to || "", how: res.how || "", n: res.n || "", read: res.read || "", opts: res.opts || null, none: !!res.none, last: !!res.last };
+    var cur = here(st), r = { kind: res.kind, g: raw, at: cur, to: res.to || "", how: res.how || "", n: res.n || "", read: res.read || "", opts: res.opts || null, none: !!res.none, last: !!res.last, guess: res.guess || "" };
     if (r.kind === "static" || r.kind === "broad") st.tried[cur + "|" + norm(raw)] = 1;
     if (r.kind === "move") { st.path.push(r.to); st.strokes++; if (r.to === R.target) { st.done = true; st.solved = true; } }
     if (r.kind === "static") st.strokes++;
@@ -731,7 +770,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     return y + 36;
   }
   function kindName(r) {
-    return r.kind === "move" ? (r.to === R.target ? "REACHED · +1" : "MOVE · +1") : r.kind === "broad" ? (r.cost ? "TOO BROAD · +1" : "TOO BROAD · FREE") : r.kind === "dym" ? (r.none ? "NOT FOUND · FREE" : "WHICH ONE? · FREE") : r.kind === "track" ? "TRACKING · +1" : r.kind === "rewind" ? "REWOUND · FREE" : "STATIC · +1";
+    return r.kind === "move" ? (r.to === R.target ? "REACHED · +1" : "MOVE · +1") : r.kind === "broad" ? (r.cost ? "TOO BROAD · +1" : "TOO BROAD · FREE") : r.kind === "dym" ? (r.none ? "NOT FOUND · FREE" : r.guess ? "NOT SURE · FREE" : "WHICH ONE? · FREE") : r.kind === "track" ? "TRACKING · +1" : r.kind === "rewind" ? "REWOUND · FREE" : "STATIC · +1";
   }
   function kindShort(k) { return k === "move" ? "MOVE" : k === "broad" ? "TOO BROAD" : k === "dym" ? "WHICH?" : k === "track" ? "TRACKING" : k === "rewind" ? "REWIND" : "STATIC"; }
   // how a step connects, in words: "Squirrel's page links Nut"
@@ -748,7 +787,8 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       return s;
     }
     if (r.kind === "broad") return (r.to && norm(r.to) !== norm(r.g) ? "“" + r.g + "” means " + r.to + ", which" : "“" + r.g + "”") + " is too broad: big umbrella topics (music, film, food, a country...), years and lists connect to everything. Be more specific. " + (r.cost ? "In Hard mode that costs a stroke." : "No stroke.");
-    if (r.kind === "dym") return r.none ? "Couldn't find a Wikipedia page for “" + r.g + "”." + (r.opts.length ? " Did you mean " + r.opts.join(", ") + "?" : " Try another name for it.") + " No stroke." : "Which one? “" + r.g + "” could be " + r.opts.join(", ") + ", and none of them connects to " + at + ". Try one by its full name. No stroke.";
+    if (r.kind === "dym" && r.guess) return "No page is called “" + r.g + "”, so it was read as " + r.guess + ", and that doesn't connect to " + at + ". Since that was a guess at what you meant, no stroke: try the page's exact name.";
+    if (r.kind === "dym") return r.none ? "Couldn't find a Wikipedia page that is “" + r.g + "”." + (r.opts.length ? " Closest: " + r.opts.join(", ") + "." : "") + " Try its exact name. No stroke." : "Which one? “" + r.g + "” could be " + r.opts.join(", ") + ", and none of them connects to " + at + ". Try one by its full name. No stroke.";
     if (r.kind === "track") return r.via ? at + "'s page links " + r.via + ", and " + r.via + " is one step from " + tg + "." : r.far ? "Nothing " + at + " links is one step from " + tg + ". But " + r.far + " is. Find your way there." : "No track from here. REWIND is free.";
     if (r.kind === "rewind") return "Back on " + at + ". No stroke.";
     if (MODE === "hard") return "Neither page links the other: " + at + " and " + (r.to || "“" + r.g + "”") + ". In Hard mode only real links count. One stroke.";
