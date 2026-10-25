@@ -5,7 +5,8 @@
 // It also checks the end screen's links, share, today's score and the leaderboard (posting as "Test bot", removed after),
 // reload, ?reset and the ARCHIVE tab, and fails on console errors or
 // horizontal overflow. Screenshots go to shots/noclick-<phone|desk>-<step>.png.
-//   node noclick/test.cjs [url]          ONLY=phone|desk to run one device
+//   node noclick/test.cjs [url]          ONLY=phone|desk to run one device (the app: http://127.0.0.1:<port>/games/; with no
+//                                        database there its leaderboard says "not switched on", so posting is reported, not tested)
 const { chromium } = require('/Users/vincentfeng/whiterabbit/video/node_modules/playwright-core');
 const fs = require('fs');
 const path = require('path');
@@ -23,6 +24,8 @@ async function run(name, vp, mobile, browser, errors) {
   const page = await ctx.newPage();
   page.on('console', m => { if (m.type() === 'error') errors.push(name + ': ' + m.text()); });
   page.on('pageerror', e => errors.push(name + ' pageerror: ' + e.message));
+  // whiterabbt.com serves the game under a strict, nonce-based Content-Security-Policy: anything it blocks is an error
+  await page.addInitScript(() => document.addEventListener('securitypolicyviolation', e => console.error('CSP blocked ' + e.violatedDirective + ' ' + e.blockedURI)));
   const shot = async step => { await page.waitForTimeout(250); await page.screenshot({ path: path.join(SHOTS, `noclick-${name}-${step}.png`) }); };
   const overflow = async where => { const ow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth || document.body.scrollWidth > window.innerWidth); if (ow) errors.push(`${name}: horizontal overflow at ${where}`); };
   const state = () => page.evaluate(() => window.__noclick.tapes());
@@ -79,7 +82,8 @@ async function run(name, vp, mobile, browser, errors) {
   await page.waitForTimeout(4000);
   await shot('5-tape1-end'); await overflow('tape 1 end');
   const holeHref = await page.locator('#hits a[aria-label^="Open this rabbit hole"]').getAttribute('href');
-  if (holeHref !== TAPES[0].hole.url) errors.push(`${name}: hole link ${holeHref}`);
+  // the app links its own rabbit holes by path (/r/<id>/<title>), this repo's disks by full address
+  if (holeHref !== TAPES[0].hole.url && holeHref !== new URL(TAPES[0].hole.url).pathname) errors.push(`${name}: hole link ${holeHref}`);
   if (!/whiterabbt\.com\/daily/.test(await page.locator('#hits a[aria-label^="More rabbit holes"]').getAttribute('href'))) errors.push(`${name}: more-holes link`);
 
   // tape 2: the rabbit's own route
@@ -111,12 +115,16 @@ async function run(name, vp, mobile, browser, errors) {
   if (await view() !== 'scores') errors.push(`${name}: today's score didn't open`);
   await shot('9b-scores'); await overflow('scores');
   if (mobile) { for (let k = 0; k < 5; k++) { await page.mouse.wheel(0, 400); await page.waitForTimeout(150); } await page.waitForTimeout(600); }
+  const boardOn = (await page.evaluate(() => window.__noclick.board().state)) !== 'setup';
+  if (!boardOn) console.log(`${name}: the leaderboard isn't switched on here (no database): posting not tested`);
+  if (boardOn) {
   await page.locator('#hits input[data-id="name"]').fill('Test bot');
   await btn('Post my score').click({ force: true });
   for (let i = 0; i < 40 && !(await page.evaluate(() => window.__noclick.board().entries.some(e => e.mine))); i++) await page.waitForTimeout(250);
   const mine = (await page.evaluate(() => window.__noclick.board().entries)).find(e => e.mine);
   if (!mine || mine.name !== 'Test bot') errors.push(`${name}: not on the leaderboard: ${JSON.stringify(await page.evaluate(() => window.__noclick.board()))}`);
   await shot('9c-posted');
+  }
 
   // progress survives a reload, ?reset clears it
   await page.goto(URL0); await waitView('shelf');
@@ -149,7 +157,7 @@ async function run(name, vp, mobile, browser, errors) {
   if (!(await btn('Switch to Archive').isVisible().catch(() => false))) { console.log(`${name}: no ARCHIVE tab here (desk.html absent), skipped`); await ctx.close(); return; }
   await btn('Switch to Archive').click({ force: true });
   // the switch is what's tested, not how long the desk game takes to load
-  await page.waitForURL(/\/desk/, { timeout: 30000, waitUntil: 'commit' }).catch(() => errors.push(`${name}: ARCHIVE tab didn't reach /desk`));
+  await page.waitForURL(/\/desk|\/games\/archive/, { timeout: 30000, waitUntil: 'commit' }).catch(() => errors.push(`${name}: ARCHIVE tab didn't reach the desk game`));
   await ctx.close();
 }
 

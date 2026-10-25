@@ -1,6 +1,6 @@
 # No Clicking
 
-A daily Wikipedia game from [White Rabbit](https://whiterabbt.com). Each day there are three floppy disks. Each disk is a start page and a target page from a real rabbit hole, like *Pretzel → Caramelization*. Nothing on screen is clickable: you make your own trail by typing anything connected to where you are, one step at a time (*nutmeg → nuts → squirrel → animal → pigeons → New York → Manhattan*).
+A daily Wikipedia game from [White Rabbit](https://www.whiterabbt.com), played at **[whiterabbt.com/games](https://www.whiterabbt.com/games)** (Archive, the other game, at [/games/archive](https://www.whiterabbt.com/games/archive)). The old address, echo-taupe-ten.vercel.app, sends people there. This repository is where the games are made and tried; `export-to-app.mjs` copies them into the White Rabbit app, which serves them. Each day there are three floppy disks. Each disk is a start page and a target page from a real rabbit hole, like *Pretzel → Caramelization*. Nothing on screen is clickable: you make your own trail by typing anything connected to where you are, one step at a time (*nutmeg → nuts → squirrel → animal → pigeons → New York → Manhattan*).
 
 - **Modes.** Pick Easy, Medium (the default) or Hard on the shelf; the mode applies to all three disks and keeps its own progress and leaderboard. Easy lets big topics through and reads names loosely; Medium is the rules below; Hard counts only real links (no names, no AI referee), charges a stroke for a too-broad guess, and ejects at par + 3.
 - **MOVE** (1 stroke): a step counts when either Wikipedia page links the other, or one names the other in its text. When Wikipedia doesn't tie them, or can't be reached, a light AI referee (OpenAI's cheapest model, the one White Rabbit's app uses) decides whether most people would see a clear connection (Werther's Original → Caramelization: yes; Germany → Basketball: no). Any capitalisation, redirects, plurals and loose names work ("werthers candy" finds Werther's Original through Wikipedia's search); an ambiguous name ("nuts", "new york") takes the sense that connects.
@@ -27,6 +27,8 @@ Then open http://localhost:4747. A phone on the same Wi-Fi can open the address 
 
 ## Making disks
 
+On whiterabbt.com the app makes the disks itself, every day: an hourly job takes three public rabbit holes it hasn't used, reads each one's longest run of Wikipedia pages, picks a start and a target that aren't already one step apart (3 to 7 moves), and keeps them in its database a day or two ahead (`src/lib/games/no-clicking/` and migration `0071_no_clicking.sql` in the app). Each player gets the day where they are. The referee and the leaderboard are the app's own routes there (`/api/games/no-clicking/judge` and `/board`), on its OpenAI key and its database. What follows is how this repository makes disks for trying the game locally.
+
 The game checks each step live against Wikipedia's API from the browser (a few small requests per guess, cached, with an `Api-User-Agent`). The AI referee runs server side in `noclick/judge.mjs`: `serve.mjs` serves it at `POST /api/judge` (it reads `OPENAI_API_KEY` and `WHITE_RABBIT_OPENAI_MODEL` from the environment, or from the White Rabbit app's `.env.local`), and `api/judge.js` is the same thing as a Vercel function, which needs `OPENAI_API_KEY` set in the Vercel project. Without a key the game still works on Wikipedia alone. A disk is a small file `noclick/build_tapes.py` writes ahead of time (Python 3, no packages; polite, cached requests):
 
 ```bash
@@ -46,7 +48,8 @@ It checks the start and target aren't already one step apart, takes par from the
 | `game.html` | No Clicking: page, styles, the referee, the floppy-disk wheel and the CRT shader |
 | `noclick/` | The disk builder (`build_tapes.py`), today's list, the disks and the end-to-end test (`strict/`: the earlier strict mode) |
 | `echo-legacy.html` | Echo, the earlier guess-the-missing-word game, kept so it can come back (it reads `rounds-today.json` and `img/vega.jpg`) |
-| `serve.mjs`, `page.mjs`, `build.mjs` | The local server and the static build (`npm run build` writes `dist/`) |
+| `serve.mjs`, `page.mjs`, `build.mjs` | The local server and the static build (`npm run build` writes `dist/`; the Vercel project now only redirects to whiterabbt.com, `vercel.json`) |
+| `export-to-app.mjs` | Copies `game.html`, `noclick/broad.json`, `desk.html` and the sealed case into the White Rabbit app (`node export-to-app.mjs [app folder]`), then commit them there |
 | `api/judge.js`, `api/board.js` | The AI referee and the leaderboard as Vercel functions |
 
 ## Credits

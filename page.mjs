@@ -17,6 +17,7 @@ export function buildPage({ shareUrl = 'auto' } = {}) {
   const json = (`{"day":${JSON.stringify(today.day)},"date":${JSON.stringify(today.date)},"broad":${broad},"tapes":[` + tapes.join(',') + ']}').replace(/<\//g, '<\\/');
   return '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n' +
     tpl.replace('__PUZZLES__', () => json).replace('__SHARE_URL__', () => shareUrl)
+      .replace('__API__', () => '/api').replace('__ARCHIVE_HREF__', () => '/desk') // serve.mjs's routes; whiterabbt.com's /games route has its own
       .replace('__ARCHIVE__', () => (fs.existsSync(new URL('desk.html', dir)) ? 'on' : 'off')) + '\n</html>'; // ARCHIVE tab only where the desk game is
 }
 /* The case goes into the page sealed, so View Source shows no answers. Every report blank's "accept" list becomes

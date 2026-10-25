@@ -42,7 +42,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   </div>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" integrity="sha512-dLxUelApnYxpLt6K2iomGngnHO83iUvZytA3YjDUCjT0HDOHKXnVYdf3hU4JjM8uEhxf9nD1/ey98U3t2vZ0qQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
 <script id="tape-data" type="application/json">__PUZZLES__</script>
 <script>
 (function () {
@@ -54,6 +54,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   var RI = 0, R = ROUNDS[0];
   var SHARE_URL = "__SHARE_URL__"; if (SHARE_URL === "auto") SHARE_URL = location.origin + location.pathname;
   var NAME = "No Clicking";
+  var WR_API = "__API__", ARCHIVE_HREF = "__ARCHIVE_HREF__"; // where the referee and leaderboard answer, and the desk game's page (page.mjs, or the app's /games route)
   var ARCHIVE = "__ARCHIVE__" === "on"; // the ARCHIVE tab shows only where the desk game is served (page.mjs decides)
   var EJECT = 5; // strokes over par before the tape ejects and plays the rabbit's route (set by the mode)
   // three ways to play the same tapes; the player picks, and each mode keeps its own progress and leaderboard
@@ -62,7 +63,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     medium: { name: "MEDIUM", eject: 5, broadList: true, strictNames: true, names: true, ai: true, broadCost: 0 },
     hard: { name: "HARD", eject: 3, broadList: true, strictNames: true, names: false, ai: false, broadCost: 1 }
   };
-  var MODE = "medium"; try { var m0 = localStorage.getItem("wr-noclick-mode"); if (MODES[m0]) MODE = m0; } catch (e) {}
+  var MODE = "medium"; try { var m0 = localStorage.getItem("white-rabbit-no-clicking-mode"); if (MODES[m0]) MODE = m0; } catch (e) {}
   function rules() { return MODES[MODE]; }
   EJECT = rules().eject;
   var STORE = "";
@@ -175,7 +176,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     if (PAGES[k] !== undefined) return Promise.resolve(PAGES[k]);
     if (AI_OFF) return Promise.resolve(null);
     if (ui.busy && !ui.busy.quiet) { ui.busy.ai = true; ui.dirty = true; kick(); }
-    return fetch("/api/judge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ a: a, b: b, aDesc: aDesc || "", bDesc: bDesc || "", mode: MODE }) })
+    return fetch(WR_API + "/judge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ a: a, b: b, aDesc: aDesc || "", bDesc: bDesc || "", mode: MODE }) })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (j) { if (j && j.off) AI_OFF = true; var v = j && typeof j.related === "boolean" ? { related: j.related, why: j.why || "" } : null; if (v) PAGES[k] = v; return v; }, function () { return null; });
   }
@@ -310,15 +311,15 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     return fresh();
   }
   // ?reset wipes this device's progress so a tester can play today's tapes again
-  if (/[?&]reset\b/.test(location.search)) { try { Object.keys(localStorage).forEach(function (k) { if (k.indexOf("wr-noclick:") === 0) localStorage.removeItem(k); }); history.replaceState(null, "", location.pathname); } catch (e) {} }
+  if (/[?&]reset\b/.test(location.search)) { try { Object.keys(localStorage).forEach(function (k) { if (/^white-rabbit-no-clicking-(?:day|posted)-|^white-rabbit-no-clicking-help$/.test(k)) localStorage.removeItem(k); }); history.replaceState(null, "", location.pathname); } catch (e) {} }
   var STATES = [], ST = null;
-  function useRound(i) { RI = Math.max(0, Math.min(ROUNDS.length - 1, i)); R = ROUNDS[RI]; STORE = "wr-noclick:v2:" + DATA.date + ":" + (MODE === "medium" ? "" : MODE + ":") + R.slug; if (!STATES[RI]) STATES[RI] = build(); ST = STATES[RI]; }
+  function useRound(i) { RI = Math.max(0, Math.min(ROUNDS.length - 1, i)); R = ROUNDS[RI]; STORE = "white-rabbit-no-clicking-day-" + DATA.date + "-" + MODE + "-" + R.slug; if (!STATES[RI]) STATES[RI] = build(); ST = STATES[RI]; }
   for (var ri0 = 0; ri0 < ROUNDS.length; ri0++) useRound(ri0);
   // switching mode: that mode's own progress, lamps and leaderboard
   function setMode(m) {
     if (!MODES[m] || m === MODE) return;
     MODE = m; EJECT = rules().eject;
-    try { localStorage.setItem("wr-noclick-mode", m); } catch (e) {}
+    try { localStorage.setItem("white-rabbit-no-clicking-mode", m); } catch (e) {}
     STATES = []; ROUNDS.forEach(function (r) { r.lamp = {}; });
     for (var i = 0; i < ROUNDS.length; i++) useRound(i);
     useRound(focus); BOARD.state = "idle"; ui.tip = null; flash(); ui.dirty = true; kick();
@@ -631,9 +632,9 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     T(head, bx + pad, by + 24, { size: 18, color: COL.ink, glow: 0 });
     para(def, bx + pad, by + 28, bw - pad * 2, { size: 15, fam: FF.mono, pre: "500", color: COL.osd, lh: 22 });
   }
-  function helpSeen() { try { return localStorage.getItem("wr-noclick:help") === "1"; } catch (e) { return true; } }
+  function helpSeen() { try { return localStorage.getItem("white-rabbit-no-clicking-help") === "1"; } catch (e) { return true; } }
   function openHelp() { ui.modal = "help"; ui.tip = null; ui.dirty = true; flash(); kick(); }
-  function closeHelp() { ui.modal = null; ui.tip = null; try { localStorage.setItem("wr-noclick:help", "1"); } catch (e) {} ui.dirty = true; kick(); }
+  function closeHelp() { ui.modal = null; ui.tip = null; try { localStorage.setItem("white-rabbit-no-clicking-help", "1"); } catch (e) {} ui.dirty = true; kick(); }
   // how to play, as a box over the tape; the X (or GOT IT, or Escape) closes it
   function drawModal() {
     var W = ui.W, H = ui.H, narrow = W < 760, pad = narrow ? 18 : 28;
@@ -1081,12 +1082,12 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   }
   // the leaderboard: from /api/board (noclick/board.mjs), by score, then strokes, then who posted first
   var BOARD = { state: "idle", entries: [], you: null, err: "" };
-  function deviceId() { try { var d = localStorage.getItem("wr-noclick-device"); if (!d) { d = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()); localStorage.setItem("wr-noclick-device", d); } return d; } catch (e) { return "no-storage-" + String(Math.random()).slice(2); } }
-  function savedName() { try { return localStorage.getItem("wr-noclick-name") || ""; } catch (e) { return ""; } }
-  function postedName() { try { return localStorage.getItem("wr-noclick:posted:" + DATA.date) || ""; } catch (e) { return ""; } }
+  function deviceId() { try { var d = localStorage.getItem("white-rabbit-no-clicking-device"); if (!d) { d = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()); localStorage.setItem("white-rabbit-no-clicking-device", d); } return d; } catch (e) { return "no-storage-" + String(Math.random()).slice(2); } }
+  function savedName() { try { return localStorage.getItem("white-rabbit-no-clicking-name") || ""; } catch (e) { return ""; } }
+  function postedName() { try { return localStorage.getItem("white-rabbit-no-clicking-posted-" + DATA.date + "-" + MODE) || ""; } catch (e) { return ""; } }
   function fetchBoard() {
     BOARD.state = "loading"; ui.dirty = true; kick();
-    fetch("/api/board?date=" + encodeURIComponent(DATA.date) + "&mode=" + MODE + "&device=" + encodeURIComponent(deviceId())).then(function (r) {
+    fetch(WR_API + "/board?date=" + encodeURIComponent(DATA.date) + "&mode=" + MODE + "&device=" + encodeURIComponent(deviceId())).then(function (r) {
       if (r.status === 503) { BOARD.state = "setup"; return null; }
       if (!r.ok) throw new Error(r.status); return r.json();
     }).then(function (j) { if (j && j.setup) BOARD.state = "setup"; else if (j) { BOARD.entries = j.entries || []; BOARD.you = BOARD.entries.filter(function (e) { return e.mine; })[0] || null; BOARD.state = "ok"; } ui.dirty = true; kick(); },
@@ -1098,14 +1099,14 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     if (!dayTotals().all || BOARD.state === "posting") return;
     BOARD.err = ""; BOARD.state = "posting"; ui.dirty = true; kick();
     var body = { date: DATA.date, mode: MODE, device: deviceId(), name: name, tapes: ROUNDS.map(function (r, i) { var st = STATES[i]; return { slug: r.slug, par: r.par, strokes: strokesOf(st, r), solved: st.solved }; }) };
-    fetch("/api/board", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then(function (r) {
+    fetch(WR_API + "/board", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then(function (r) {
       if (r.status === 503) { BOARD.state = "setup"; return null; }
       return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || r.status); return j; });
     }).then(function (j) {
       if (j && j.setup) BOARD.state = "setup";
       else if (j) {
         BOARD.entries = j.entries || []; BOARD.you = j.you || null; BOARD.state = "ok";
-        try { localStorage.setItem("wr-noclick-name", name); localStorage.setItem("wr-noclick:posted:" + DATA.date + ":" + MODE, name); } catch (e) {}
+        try { localStorage.setItem("white-rabbit-no-clicking-name", name); localStorage.setItem("white-rabbit-no-clicking-posted-" + DATA.date + "-" + MODE, name); } catch (e) {}
         ui.nameText = undefined; ui.editName = false;
         if (hitEls.name) hitEls.name.blur();
       }
@@ -1573,7 +1574,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     ui.view = "shelf"; if (GL) GL.show(true); setFocus(RI); flash();
     try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
   }
-  function toArchive() { flash(); setTimeout(function () { location.href = "/desk"; }, reduce ? 0 : 160); }
+  function toArchive() { flash(); setTimeout(function () { location.href = ARCHIVE_HREF; }, reduce ? 0 : 160); }
   function toggleBW() { ui.bw = !ui.bw; ui.dirty = true; kick(); }
   function submitGuess() {
     var el = hitEls.guess, val = (el ? el.value : ui.input).trim(); if (!val || ui.busy || ST.done) return;
