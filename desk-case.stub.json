@@ -1,0 +1,157 @@
+{
+  "id": "stub-stopped-clock",
+  "no": 0,
+  "title": "THE STOPPED CLOCK (STUB)",
+  "question": "HOW DID A STOPPED CLOCK GIVE THE KILLER AN ALIBI?",
+  "agency": "CITY POLICE · HOMICIDE",
+  "briefing": [
+    "Placeholder case for testing the desk. Harold Brandt, clock dealer, found dead in his back office at 0705 hours.",
+    "The wall clock came down with him. It stopped at 9:15. Everybody likes a clock like that.",
+    "Close it by morning. — Capt. R. Iles"
+  ],
+  "drawers": [
+    { "id": "scene", "label": "SCENE" },
+    { "id": "people", "label": "PEOPLE" },
+    { "id": "evidence", "label": "EVIDENCE" }
+  ],
+  "search": { "limit": 5, "empty": "NO RECORD ON FILE", "too_broad": ["clock", "brandt", "police", "shop", "murder"] },
+  "files": [
+    {
+      "id": "incident", "drawer": "scene", "kind": "record", "object": "report", "title": "Incident report", "tab": "INCIDENT", "open": true,
+      "cover": "PATROL #4417",
+      "search": ["incident", "incident report", "patrol", "4417"],
+      "lines": [
+        "0705 hours. Responded to Brandt Clocks, 14 Harrow Lane. The assistant, Mira Holt, found Harold Brandt dead in the back office.",
+        "A wall clock lay face down beside him, glass broken, hands stopped at [[9:15|t0915]].",
+        "Back door bolted inside. Front door locked; the only other key is with the nephew, {{Leo Brandt|leo}}."
+      ],
+      "back": [
+        "Canvass, flat 14A: a neighbour, {{Mrs. Odile Fenn|fenn_tape}}, heard a crash in the evening. Statement taped at 0750."
+      ]
+    },
+    {
+      "id": "clockphoto", "drawer": "evidence", "kind": "record", "object": "photo", "title": "Item 3: the wall clock", "tab": "ITEM 3", "open": true,
+      "cover": "Item No. 3 · recovered from the floor",
+      "search": ["item 3", "wall clock", "clock photo", "item no 3"],
+      "figure": [
+        { "t": "circle", "x": 50, "y": 50, "r": 40, "c": "ink" },
+        { "t": "circle", "x": 50, "y": 50, "r": 2, "c": "ink" },
+        { "t": "line", "x": 50, "y": 50, "x2": 50, "y2": 14, "c": "ink" },
+        { "t": "line", "x": 50, "y": 50, "x2": 74, "y2": 54, "c": "ink" },
+        { "t": "text", "x": 50, "y": 20, "s": "12", "c": "faint" },
+        { "t": "text", "x": 84, "y": 53, "s": "3", "c": "faint" },
+        { "t": "text", "x": 50, "y": 88, "s": "6", "c": "faint" },
+        { "t": "text", "x": 16, "y": 53, "s": "9", "c": "faint" },
+        { "t": "arrow", "x": 88, "y": 14, "x2": 66, "y2": 30, "c": "red" },
+        { "t": "text", "x": 88, "y": 9, "s": "GLASS OUT", "c": "red" }
+      ],
+      "lines": [ "Hands at 9:15. Glass broken outward. Pendulum unhooked." ],
+      "back": [ "Lab pencil: eight-day movement, [[fully wound|wound]]. It did not run down." ]
+    },
+    {
+      "id": "leo", "drawer": "people", "kind": "person", "object": "idcard", "title": "Leo Brandt", "tab": "LEO",
+      "person": { "years": "age 31", "role": "nephew; owes the victim money", "portrait": null },
+      "search": ["leo", "leo brandt", "nephew"],
+      "lines": [ "Says he left the shop at nine and walked home alone. Nobody saw him after 9:00 PM." ],
+      "back": [ "Holds the second key to the front door." ]
+    },
+    {
+      "id": "holt", "drawer": "people", "kind": "person", "object": "idcard", "title": "Mira Holt", "tab": "HOLT",
+      "person": { "years": "age 44", "role": "shop assistant, eleven years", "portrait": null },
+      "search": ["holt", "mira", "mira holt", "assistant"],
+      "lines": [ "Locked up at 8:00 PM, she says, and went straight to the 8:30 show at the [[Rialto Cinema|cinema]]." ],
+      "back": [ "Kept her ticket stub. Showed it before anyone asked." ]
+    },
+    {
+      "id": "fenn_tape", "drawer": "evidence", "kind": "record", "object": "tape", "title": "Interview: Odile Fenn", "tab": "TAPE 1",
+      "speaker": "ODILE FENN", "cover": "Side A · 0750 hours",
+      "search": ["fenn", "odile", "odile fenn", "neighbour", "neighbor", "tape"],
+      "lines": [
+        "DET.: Tell me about the noise.",
+        "I had the wireless on. The eight o'clock news had just finished, so it was [[ten past eight|t0810]].",
+        "Then a crash from Mr. Brandt's, like glass going. I thought he'd dropped a clock. He was always dropping something.",
+        "After that? Nothing. Not a sound all night."
+      ]
+    },
+    {
+      "id": "pathology", "drawer": "scene", "kind": "record", "object": "autopsy", "title": "Pathologist's note", "tab": "PATHOLOGY",
+      "unlock": { "after": "p1", "via": "phone", "text": "The pathologist, on the line: 'Between six-thirty and eight-thirty last night. Not nine-fifteen. I've allowed for the radiator.'" },
+      "search": ["pathology", "pathologist", "time of death"],
+      "lines": [
+        "Cause of death: (a) blunt force injury to the head. Manner: pending.",
+        "Estimated time of death: between [[6:30 and 8:30 PM|window]], allowing for the radiator the first officer switched off."
+      ]
+    }
+  ],
+  "notes": {
+    "t0915": { "label": "9:15", "type": "time" },
+    "t0810": { "label": "10 PAST 8", "type": "time" },
+    "window": { "label": "6:30 TO 8:30 PM", "type": "time" },
+    "wound": { "label": "FULLY WOUND", "type": "fact" },
+    "cinema": { "label": "RIALTO CINEMA", "type": "place" }
+  },
+  "monologue": [
+    { "on": "start", "text": "A clock stopped at nine-fifteen. Sometimes a case hands you the time on a plate." },
+    { "on": "open:leo", "text": "Leo. Owes his uncle money, holds a key, and walked home alone. They always walk home alone." },
+    { "on": "play:fenn_tape", "text": "A crash at ten past eight. Probably a clock off a shelf. That shop is full of them." },
+    { "on": "confirm:p1", "text": "Leo, at nine-fifteen. It fits. I should feel better about it than I do." },
+    { "on": "miss:p2", "text": "No. Something in that sentence is wrong, and it might be me." },
+    { "on": "arrive:pathology", "text": "Six-thirty to eight-thirty. Then what was that clock doing at nine-fifteen?" }
+  ],
+  "report": {
+    "title": "CASE REPORT",
+    "parts": [
+      { "id": "p1", "heading": "FIRST THEORY", "after": null,
+        "text": "{a} killed Harold Brandt at {b}, when the clock came down.",
+        "blanks": { "a": { "accept": ["leo"], "type": "person" }, "b": { "accept": ["t0915"], "type": "time" } },
+        "wrong_but_expected": "The clock's time and the one man with no alibi for it: the theory the scene was built to give." },
+      { "id": "p2", "heading": "THE CLOCK", "after": "p1",
+        "text": "The clock fell at {a}. {b} set its hands to 9:15, knocked it down, and left for the {c}.",
+        "blanks": { "a": { "accept": ["t0810"], "type": "time" }, "b": { "accept": ["holt"], "type": "person" }, "c": { "accept": ["cinema"], "type": "place" } } }
+    ],
+    "overturn": [ { "after": "p1", "text": "The pathologist's window shuts before nine. The clock never stopped at the time of death: somebody chose what it would say." } ]
+  },
+  "solution": [
+    "open file incident",
+    "clip note t0915",
+    "follow lead leo",
+    "follow lead fenn_tape",
+    "open file leo",
+    "clip person leo",
+    "search: mira holt -> open result holt",
+    "clip person holt",
+    "clip note cinema in holt",
+    "open file clockphoto",
+    "flip clockphoto",
+    "clip note wound in clockphoto",
+    "play tape fenn_tape",
+    "clip note t0810 in fenn_tape",
+    "fill blank p1.a with note leo",
+    "fill blank p1.b with note t0915",
+    "confirm p1",
+    "answer phone",
+    "open file pathology",
+    "clip note window",
+    "fill blank p2.a with note t0810",
+    "fill blank p2.b with note holt",
+    "fill blank p2.c with note cinema",
+    "confirm p2"
+  ],
+  "truth": {
+    "headline": "THE CLOCK DIDN'T STOP. IT WAS STOPPED.",
+    "how_it_seemed_impossible": "The clock pinned the death to 9:15, when Leo had no alibi and Mira was in a cinema with a stub to prove it.",
+    "how_it_was_possible": [
+      "Mira struck Harold a little before eight.",
+      "She turned the clock's hands to 9:15 and knocked it from the wall. A fallen clock shows whatever its hands say.",
+      "At ten past eight the neighbour heard the crash: the clock coming down an hour before the time it showed.",
+      "Then Mira walked to the 8:30 show and kept the stub where it would be seen."
+    ],
+    "rerun": [
+      { "file": "clockphoto", "text": "Fully wound: it never ran down. Its hands were set by hand, to a time someone picked." },
+      { "file": "fenn_tape", "text": "The crash at ten past eight was the clock itself." },
+      { "file": "holt", "text": "A stub shown before anyone asked is an alibi that was prepared." }
+    ],
+    "epilogue": "Placeholder epilogue for the stub case. The real case replaces all of this."
+  },
+  "credits": "STUB CASE for engine testing. An original fictional case. Any resemblance to real people is coincidental. Type: Handjet (OFL). 3D: three.js r128 (MIT)."
+}

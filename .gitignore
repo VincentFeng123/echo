@@ -14,3 +14,11 @@ img/vega.b64
 node_modules/
 dist/
 .DS_Store
+# the desk's case files carry their answers in plain text (accept lists, the walkthrough, the notes on wrong answers),
+# and the test knows the twists: never publish them. Commit only the stub and the sealed case (node seal-case.mjs),
+# which the page serves when the plain desk-case.json is not there (as on Vercel)
+desk-case*.json
+!desk-case.stub.json
+!desk-case.sealed.json
+desk-test*.cjs
+desk-test*.log
