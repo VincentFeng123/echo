@@ -1,4 +1,4 @@
-<title>White Rabbit Echo</title>
+<title>White Rabbit No Clicking</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -43,154 +43,240 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-<script id="round-data" type="application/json">__ROUND__</script>
+<script id="tape-data" type="application/json">__PUZZLES__</script>
 <script>
 (function () {
   "use strict";
-  var ROUNDS = JSON.parse(document.getElementById("round-data").textContent);
-  if (!Array.isArray(ROUNDS)) ROUNDS = [ROUNDS];
+  var DATA = JSON.parse(document.getElementById("tape-data").textContent);
+  var ABOUT = {}; DATA.tapes.forEach(function (p) { Object.keys(p.about || {}).forEach(function (t) { ABOUT[t] = p.about[t]; }); });
+  var ROUNDS = DATA.tapes.map(function (p, i) { return { slug: p.slug, start: p.start, target: p.target, par: p.par, hole: p.hole, near: p.near || [], level: p.level || "", ink: p.ink || "", lamp: {} }; });
   var RI = 0, R = ROUNDS[0];
   var SHARE_URL = "__SHARE_URL__"; if (SHARE_URL === "auto") SHARE_URL = location.origin + location.pathname;
-  var PHOTO = "__PHOTO__";
-  var PHOTO_CREDIT = "Cover photo: Michal Manas, CC BY 3.0, Wikimedia Commons";
-  var MAX = 6;
+  var NAME = "No Clicking";
+  var ARCHIVE = "__ARCHIVE__" === "on"; // the ARCHIVE tab shows only where the desk game is served (page.mjs decides)
+  var EJECT = 5; // strokes over par before the tape ejects and plays the rabbit's route
   var STORE = "";
-  var REVEAL = "\u0001reveal";
   var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   var BX = 3.4, BY = 2.9; // tube curvature (smaller = more bent); set per shape in resize()
 
   function $(id) { return document.getElementById(id); }
-  function norm(s) { return String(s).normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[’']/g, "").replace(/[^a-z0-9]+/g, " ").trim().replace(/^(the|a|an) /, ""); }
-  function variants(k) { var v = [k]; if (/es$/.test(k)) v.push(k.slice(0, -2)); if (/s$/.test(k)) v.push(k.slice(0, -1)); return v.filter(function (x, i) { return x && v.indexOf(x) === i; }); }
-  function osa(a, b) {
-    if (Math.abs(a.length - b.length) > 2) return 9;
-    var d = [], i, j;
-    for (i = 0; i <= a.length; i++) d[i] = [i];
-    for (j = 0; j <= b.length; j++) d[0][j] = j;
-    for (i = 1; i <= a.length; i++) for (j = 1; j <= b.length; j++) {
-      var c = a[i - 1] === b[j - 1] ? 0 : 1;
-      d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + c);
-      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i][j] = Math.min(d[i][j], d[i - 2][j - 2] + 1);
-    }
-    return d[a.length][b.length];
-  }
-  function load() { try { var v = JSON.parse(localStorage.getItem(STORE) || "null"); return v && Array.isArray(v.g) ? v : null; } catch (e) { return null; } }
-  function save(st) { try { localStorage.setItem(STORE, JSON.stringify({ g: st.raw })); } catch (e) {} }
+  function norm(s) { return String(s).normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/&/g, " and ").replace(/[’'`´ʻ]/g, "").replace(/[^a-z0-9]+/g, " ").trim().replace(/^(the|a|an) /, ""); }
+  function baseTitle(t) { return String(t).replace(/\s*\([^)]*\)\s*$/, ""); }
+  function load() { try { var v = JSON.parse(localStorage.getItem(STORE) || "null"); return v && Array.isArray(v.path) ? v : null; } catch (e) { return null; } }
+  function save(st) { try { localStorage.setItem(STORE, JSON.stringify(st)); } catch (e) {} }
   function flash() { if (reduce) return; var s = $("screen"); s.classList.remove("flash"); void s.offsetWidth; s.classList.add("flash"); }
+  function title(t) { return t || ""; }
+  function here(st) { return st.path[st.path.length - 1]; }
+  function linksTarget(t) { return R.lamp[t] === true; }
+  function onHole(t) { return t !== R.start && R.hole.route.some(function (h) { return h.t === t; }); }
 
-  /* ================= the referee ================= */
-  var STOP = { of: 1, the: 1, a: 1, an: 1, and: 1, on: 1, in: 1, to: 1, for: 1, was: 1, is: 1, at: 1, by: 1, with: 1, used: 1, be: 1, still: 1, it: 1, its: 1, that: 1, s: 1 };
-  var BROAD = ["united states", "usa", "us", "america", "united kingdom", "uk", "britain", "great britain", "england", "europe", "asia", "africa", "world", "earth", "history", "science", "technology", "internet", "music", "food", "art", "culture", "germany", "france", "japan", "china", "india", "italy", "spain", "netherlands", "holland", "world war ii", "world war i", "computer", "computers", "money", "war"];
-  var broad, accepted, answerWords, cards, onScreen, answerIdx;
-  function prepare() {
-    STORE = "wr-echo-proto:" + R.holeId;
-    broad = {}; BROAD.concat(R.tooBroad || []).forEach(function (k) { broad[norm(k)] = 1; });
-    accepted = {}; (R.accepted || []).forEach(function (k) { accepted[norm(k)] = 1; });
-    answerWords = String(R.answerDisplay).split(/\s+/);
-    cards = R.cards || [];
-    answerIdx = Math.max(0, cards.findIndex(function (c) { return c.isAnswer; }));
-    onScreen = {};
-    [R.headline, R.search && R.search.show ? R.search.text : ""].forEach(function (line) {
-      var t = norm(line).split(" ").filter(Boolean);
-      for (var n = 1; n <= 4; n++) for (var i = 0; i + n <= t.length; i++) {
-        var p = t.slice(i, i + n).join(" ");
-        if (n === 1 && (STOP[p] || p.length < 3)) continue;
-        onScreen[p] = 1;
-      }
+  /* ================= Wikipedia, live: what a typed name means, and whether two pages connect ================= */
+  // Every answer is cached for the visit, and asked with maxage so the browser and Wikipedia's edge can reuse it.
+  var API = "https://en.wikipedia.org/w/api.php";
+  var UA = "WhiteRabbitNoClicking/0.1 (https://whiterabbt.com; contact.whiterabbt.com@gmail.com)";
+  var memo = {}, PAGES = {};
+  function wiki(params) {
+    var q = { format: "json", formatversion: "2", origin: "*", maxage: "86400", smaxage: "86400" };
+    Object.keys(params).forEach(function (k) { q[k] = params[k]; });
+    if (!q.action) q.action = "query";
+    var url = API + "?" + new URLSearchParams(q).toString();
+    if (memo[url]) return memo[url];
+    var ctl = window.AbortController ? new AbortController() : null, timer = ctl ? setTimeout(function () { ctl.abort(); }, 12000) : 0;
+    return (memo[url] = fetch(url, { headers: { "Api-User-Agent": UA }, signal: ctl ? ctl.signal : undefined }).then(function (r) {
+      clearTimeout(timer); if (!r.ok) throw new Error("wikipedia " + r.status); return r.json();
+    }).catch(function (e) { clearTimeout(timer); delete memo[url]; throw e; }));
+  }
+  function info(p) { return { title: p.title, desc: p.description || "", dab: !!(p.pageprops && "disambiguation" in p.pageprops), aliases: (p.redirects || []).map(function (r) { return r.title; }) }; }
+  // a typed name -> the page it means (redirects followed, any capitalisation), or suggestions when there's no such page
+  function resolve(text) {
+    var k = "t:" + norm(text);
+    if (PAGES[k]) return Promise.resolve(PAGES[k]);
+    return wiki({ titles: text, redirects: 1, prop: "pageprops|redirects|description", ppprop: "disambiguation", rdlimit: "max", rdnamespace: 0 }).then(function (j) {
+      var p = j.query && j.query.pages && j.query.pages[0];
+      if (p && !p.missing && !p.invalid && p.ns === 0) return (PAGES[k] = PAGES["t:" + norm(p.title)] = info(p));
+      return wiki({ list: "search", srsearch: text, srwhat: "nearmatch", srlimit: 1, srprop: "" }).then(function (s) {
+        var hit = s.query && s.query.search && s.query.search[0];
+        if (hit && norm(hit.title) !== norm(text)) return resolve(hit.title).then(function (r) { return (PAGES[k] = r); });
+        // not a title or a redirect ("werthers candy"): Wikipedia's own search, taking the best hit that shares a word
+        return wiki({ list: "search", srsearch: text, srlimit: 5, srprop: "" }).then(function (f) {
+          var hits = (f.query && f.query.search || []).map(function (h) { return h.title; }).filter(function (t) { return sharesWord(text, t) && !looksBroad(t); });
+          if (hits.length) return resolve(hits[0]).then(function (r) { return (PAGES[k] = r); });
+          return { missing: true, suggest: [] };
+        });
+      });
     });
   }
-  function unblank(text) {
-    var count = (String(text).match(/_{3,}/g) || []).length;
-    if (count === answerWords.length && count > 1) { var k = 0; return String(text).replace(/_{3,}/g, function () { return answerWords[k++]; }); }
-    return String(text).replace(/_{3,}/g, R.answerDisplay);
+  // "werthers candy" and "Werther's Original" share "werther": enough to take a search hit as what you meant
+  function sharesWord(q, t) {
+    var stem = function (w) { return w.replace(/(es|s)$/, ""); };
+    var qs = norm(q).split(" ").filter(function (w) { return w.length >= 4; }).map(stem), ts = norm(t).split(" ").map(stem);
+    return qs.some(function (a) { return ts.some(function (b) { return b.length >= 4 && (a === b || (a.length >= 5 && b.length >= 5 && a.slice(0, 5) === b.slice(0, 5))); }); });
   }
-  function fresh() { return { raw: [], log: [], tried: {}, counted: 0, misses: 0, opened: {}, answerHint: false, letters: false, first: false, lit: {}, done: false, solved: false }; }
+  function textOf(t) {
+    var k = "x:" + t;
+    if (PAGES[k] !== undefined) return Promise.resolve(PAGES[k]);
+    return wiki({ prop: "extracts", titles: t, explaintext: 1, redirects: 1 }).then(function (j) { var p = j.query.pages[0]; return (PAGES[k] = (p && p.extract) || ""); });
+  }
+  function esc(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
+  // does this text name the page: its title, its title without "(...)", or one of its redirects?
+  function names(txt, p) {
+    var cands = [p.title, baseTitle(p.title)].concat(p.aliases.slice(0, 48));
+    for (var i = 0; i < cands.length; i++) { var n = cands[i]; if (n.length >= 4 && new RegExp("(^|[^A-Za-z0-9])" + esc(n) + "(?![A-Za-z0-9])", "i").test(txt)) return n; }
+    return null;
+  }
+  // The AI backup referee (noclick/judge.mjs behind /api/judge): asked only when Wikipedia doesn't tie two pages
+  // together, or can't be reached. Resolves to { related, why }, or null when there's no referee to ask.
+  var AI_OFF = false;
+  function aiJudge(a, b, aDesc, bDesc) {
+    var k = "a:" + a + "|" + b;
+    if (PAGES[k] !== undefined) return Promise.resolve(PAGES[k]);
+    if (AI_OFF) return Promise.resolve(null);
+    if (ui.busy && !ui.busy.quiet) { ui.busy.ai = true; ui.dirty = true; kick(); }
+    return fetch("/api/judge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ a: a, b: b, aDesc: aDesc || "", bDesc: bDesc || "" }) })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { if (j && j.off) AI_OFF = true; var v = j && typeof j.related === "boolean" ? { related: j.related, why: j.why || "" } : null; if (v) PAGES[k] = v; return v; }, function () { return null; });
+  }
+  // a step from a to b counts when either page links the other, or one names the other in its text
+  // (and, failing both, when the AI referee sees a clear connection)
+  function connect(a, b) {
+    var k = "c:" + a.title + "|" + b.title;
+    if (PAGES[k] !== undefined) return Promise.resolve(PAGES[k]);
+    var pl = [a.title, b.title].concat(a.aliases.slice(0, 24), b.aliases.slice(0, 24)).slice(0, 50);
+    return wiki({ prop: "links", titles: a.title + "|" + b.title, pltitles: pl.join("|"), pllimit: "max" }).then(function (j) {
+      var got = {};
+      (j.query.pages || []).forEach(function (p) { got[p.title] = (p.links || []).map(function (l) { return l.title; }); });
+      var isB = function (t) { return t === b.title || b.aliases.indexOf(t) >= 0; }, isA = function (t) { return t === a.title || a.aliases.indexOf(t) >= 0; };
+      if ((got[a.title] || []).some(isB)) return { how: "link" };
+      if ((got[b.title] || []).some(isA)) return { how: "back" };
+      return Promise.all([textOf(a.title), textOf(b.title)]).then(function (tx) {
+        var n = names(tx[0], b); if (n) return { how: "names", n: n };
+        n = names(tx[1], a); if (n) return { how: "named", n: n };
+        return aiJudge(a.title, b.title, a.desc, b.desc).then(function (v) { return v && v.related ? { how: "ai", n: v.why } : null; });
+      });
+    }).then(function (r) { PAGES[k] = r; return r; });
+  }
+  // a name that's a disambiguation page: take the sense that connects to where you are, or ask which one
+  function pickSense(d, cur, text) {
+    return wiki({ generator: "links", titles: d.title, gpllimit: "max", gplnamespace: 0, redirects: 1 }).then(function (j) {
+      var key = norm(baseTitle(d.title)), all = (j.query && j.query.pages || []).filter(function (p) { return !p.missing; }).map(function (p) { return p.title; });
+      var senses = all.filter(function (t) { var n = norm(t); return n === key || n.indexOf(key + " ") === 0 || norm(baseTitle(t)) === key; }).slice(0, 20);
+      if (!senses.length) return { kind: "dym", opts: all.slice(0, 3) };
+      var pl = [cur.title].concat(senses).slice(0, 50);
+      return wiki({ prop: "links", titles: pl.join("|"), pltitles: pl.join("|"), pllimit: "max" }).then(function (lj) {
+        var linked = {};
+        (lj.query.pages || []).forEach(function (p) { (p.links || []).forEach(function (l) { if (p.title === cur.title) linked[l.title] = 1; else if (l.title === cur.title) linked[p.title] = 1; }); });
+        var hit = senses.filter(function (t) { return linked[t]; });
+        if (hit.length) return resolve(hit[0]);
+        return textOf(cur.title).then(function (tx) {
+          var named = senses.filter(function (t) { return names(tx, { title: t, aliases: [] }); });
+          if (named.length) return resolve(named[0]);
+          return { kind: "dym", opts: senses.slice(0, 3) };
+        });
+      });
+    });
+  }
+
+  /* ================= the referee ================= */
+  var MONTHS = "january|february|march|april|may|june|july|august|september|october|november|december";
+  var BROAD_RE = new RegExp("^(\\d{1,4}s?( (bc|bce|ad|ce))?|\\d{1,2}(st|nd|rd|th) (century|millennium)( bc)?|(" + MONTHS + ")( \\d{1,2})?|\\d{1,2} (" + MONTHS + ")|\\d{4} in .+|.+ in \\d{4}s?|(list|lists|timeline|outline|index|glossary) of .+)$");
+  function looksBroad(s) { return BROAD_RE.test(norm(s)); }
+  function fresh() { return { log: [], path: [R.start], tried: {}, tracked: {}, strokes: 0, done: false, solved: false, ejected: false }; }
+  // what you're standing on, as a page record (its redirects matter for the checks)
+  function curPage(st) { var t = here(st); return PAGES["t:" + norm(t)] ? Promise.resolve(PAGES["t:" + norm(t)]) : resolve(t); }
+  // answers that need no Wikipedia: empty, repeats, years and lists, the page you're on
+  function precheck(raw, st) {
+    var key = norm(raw), cur = here(st);
+    if (!key || key.length < 2) return { skip: true };
+    if (st.tried[cur + "|" + key]) return { free: "You tried that from " + cur + "." };
+    if (key === norm(cur)) return { free: "You're on " + cur + " already. Type something connected to it." };
+    if (looksBroad(raw)) return { kind: "broad", g: raw };
+    return null;
+  }
   function judge(raw, st) {
-    var key = norm(raw);
-    if (!key || key.length < 2) return null;
-    if (st.tried[key]) return { free: "You tried that one." };
-    var vs = variants(key), i, v;
-    for (i = 0; i < vs.length; i++) if (accepted[vs[i]]) return { key: key, kind: "found" };
-    var acc = Object.keys(accepted);
-    for (i = 0; i < acc.length; i++) { var lim = acc[i].length >= 9 ? 2 : acc[i].length >= 5 ? 1 : 0; if (lim && osa(key, acc[i]) <= lim) return { key: key, kind: "found" }; }
-    for (i = 0; i < vs.length; i++) { v = vs[i]; if (R.partial && R.partial[v]) return { key: key, kind: "c", line: R.partial[v], partial: v }; }
-    for (i = 0; i < vs.length; i++) {
-      v = vs[i];
-      var e = R.entries && R.entries[v];
-      if (e) {
-        if (e.tier === "t") { if (st.opened[e.card]) return { free: "That page is already open on the trail." }; return { key: key, kind: "t", entry: e }; }
-        if (onScreen[v] && e.tier !== "e") return { free: "That's already on screen. Try a new idea." };
-        return { key: key, kind: e.tier, entry: e };
-      }
-    }
-    for (i = 0; i < vs.length; i++) {
-      v = vs[i];
-      if (onScreen[v]) return { free: "That's already on screen. Try a new idea." };
-      if (broad[v] || /^\d{1,4}s?$/.test(v)) return { free: "Too broad. Try something more specific." };
-    }
-    for (i = 0; i < cards.length; i++) if (st.opened[i] && norm(cards[i].title) === key) return { free: "That page is already open on the trail." };
-    return { key: key, kind: "cold" };
+    var cur = here(st);
+    return Promise.all([curPage(st), resolve(raw)]).then(function (r) {
+      var a = r[0], b = r[1];
+      if (b.missing) return { kind: "dym", opts: b.suggest.slice(0, 3), none: true }; // a page we can't find never costs a stroke
+      return (b.dab ? pickSense(b, a, raw) : Promise.resolve(b)).then(function (p) {
+        if (p.kind) return p;
+        if (p.title === cur) return { free: "You're on " + cur + " already. Type something connected to it." };
+        if (looksBroad(p.title)) return { kind: "broad", g: raw, to: p.title };
+        if (st.path.indexOf(p.title) >= 0) return { free: "You've been on " + p.title + " already. REWIND goes back for free." };
+        return connect(a, p).then(function (c) {
+          var read = norm(p.title) !== norm(raw) && norm(baseTitle(p.title)) !== norm(raw) ? p.title : "";
+          return c ? { kind: "move", to: p.title, how: c.how, n: c.n || "", read: read } : { kind: "static", to: p.title, read: read };
+        });
+      });
+    });
   }
-  // the next page down the hole after the answer; when none are left, the answer page's own summary
-  function nextReveal(st) {
-    for (var i = answerIdx + 1; i < cards.length; i++) if (!st.opened[i]) return i;
-    return st.answerHint ? -1 : "answer";
+  function checkEject(st) { if (!st.done && st.strokes >= R.par + EJECT) { st.done = true; st.ejected = true; } }
+  function record(res, raw, st) {
+    var cur = here(st), r = { kind: res.kind, g: raw, at: cur, to: res.to || "", how: res.how || "", n: res.n || "", read: res.read || "", opts: res.opts || null, none: !!res.none };
+    if (r.kind === "static" || r.kind === "broad") st.tried[cur + "|" + norm(raw)] = 1;
+    if (r.kind === "move") { st.path.push(r.to); st.strokes++; if (r.to === R.target) { st.done = true; st.solved = true; } }
+    if (r.kind === "static") st.strokes++;
+    st.log.push(r); checkEject(st);
+    return r;
   }
-  function hints(st) { st.letters = st.counted >= 4; st.first = st.counted >= 5; }
-  function apply(raw, st) {
-    if (raw === REVEAL) {
-      if (st.done) return null;
-      var nx = nextReveal(st);
-      if (nx === -1) return { free: "Nothing left to reveal." };
-      st.raw.push(raw);
-      var rr = { g: nx === "answer" ? "REVEALED THE ANSWER SUMMARY" : "REVEALED A PAGE", kind: "r", card: nx === "answer" ? answerIdx : nx, answerHint: nx === "answer" };
-      if (nx === "answer") st.answerHint = true; else st.opened[nx] = true;
-      st.log.push(rr); st.counted++; hints(st);
-      if (st.counted >= MAX) st.done = true;
-      return rr;
+  function rewind(st) {
+    if (st.done) return null;
+    if (st.path.length < 2) return { free: "You're at the start. Nothing to rewind." };
+    var r = { kind: "rewind", from: st.path.pop(), at: here(st) };
+    st.log.push(r); return r;
+  }
+  // TRACKING: a page this one links that's one step from the target, else a page one step from the target
+  function track(st) {
+    var cur = here(st);
+    if (st.tracked[cur]) return Promise.resolve({ again: st.tracked[cur] });
+    var near = {}; R.near.forEach(function (t, i) { near[t] = i + 1; });
+    var linked = [];
+    function page(cont) {
+      var q = { generator: "links", titles: cur, gpllimit: "max", gplnamespace: 0, redirects: 1 };
+      Object.keys(cont || {}).forEach(function (k) { q[k] = cont[k]; });
+      return wiki(q).then(function (j) {
+        (j.query && j.query.pages || []).forEach(function (p) { if (!p.missing && near[p.title] && st.path.indexOf(p.title) < 0) linked.push(p.title); });
+        return j.continue && linked.length < 1 ? page(j.continue) : null;
+      });
     }
-    var j = judge(raw, st);
-    if (!j || j.free) return j;
-    st.tried[j.key] = 1; st.raw.push(raw);
-    var rec = { g: raw, kind: j.kind, line: j.line || "", s: j.entry ? j.entry.s : "", src: j.entry ? j.entry.src : "", note: j.entry ? j.entry.note : "", t: j.entry ? j.entry.t : "", card: j.entry ? j.entry.card : undefined };
-    st.log.push(rec);
-    if (j.kind === "t") { st.opened[j.entry.card] = true; return rec; }
-    st.counted++;
-    if (j.kind === "found") { st.done = true; st.solved = true; return rec; }
-    if (j.partial) { var w = answerWords.findIndex(function (x) { return norm(x) === j.partial; }); if (w >= 0) st.lit[w] = true; }
-    st.misses++; hints(st);
-    if (st.counted >= MAX) st.done = true;
-    return rec;
+    return page(null).then(function () {
+      linked.sort(function (x, y) { return near[x] - near[y]; });
+      var via = linked[0] || "", far = via ? "" : (R.near.filter(function (t) { return st.path.indexOf(t) < 0; })[0] || "");
+      return { kind: "track", at: cur, via: via, far: far };
+    });
   }
   function build() {
-    var st = fresh();
-    for (var k = 0; k < answerIdx; k++) st.opened[k] = true;
-    var saved = load();
-    if (saved) saved.g.forEach(function (g) { if (!st.done) apply(g, st); });
-    return st;
+    var st = load();
+    if (st && st.path[0] === R.start) return st;
+    return fresh();
   }
-  // ?reset wipes this device's progress so a tester can play today's five again
-  if (/[?&]reset\b/.test(location.search)) { try { Object.keys(localStorage).forEach(function (k) { if (k.indexOf("wr-echo-proto:") === 0) localStorage.removeItem(k); }); history.replaceState(null, "", location.pathname); } catch (e) {} }
+  // ?reset wipes this device's progress so a tester can play today's tapes again
+  if (/[?&]reset\b/.test(location.search)) { try { Object.keys(localStorage).forEach(function (k) { if (k.indexOf("wr-noclick:") === 0) localStorage.removeItem(k); }); history.replaceState(null, "", location.pathname); } catch (e) {} }
   var STATES = [], ST = null;
-  function useRound(i) { RI = Math.max(0, Math.min(ROUNDS.length - 1, i)); R = ROUNDS[RI]; prepare(); if (!STATES[RI]) STATES[RI] = build(); ST = STATES[RI]; }
+  function useRound(i) { RI = Math.max(0, Math.min(ROUNDS.length - 1, i)); R = ROUNDS[RI]; STORE = "wr-noclick:v2:" + DATA.date + ":" + R.slug; if (!STATES[RI]) STATES[RI] = build(); ST = STATES[RI]; }
   for (var ri0 = 0; ri0 < ROUNDS.length; ri0++) useRound(ri0);
-  function points(st) { return st && st.solved ? MAX + 1 - st.counted : 0; }
-  function dayTotal() { return STATES.reduce(function (a, st) { return a + points(st); }, 0); }
+  // golf: strokes against the rabbit's route (E = even); a tape that ejects counts as par + 6
+  function score(st, r) { return !st || !st.done ? null : st.solved ? st.strokes - r.par : EJECT + 1; }
+  function golf(n) { return n === null ? "–" : n === 0 ? "E" : n > 0 ? "+" + n : "−" + (-n); }
+  function golfName(n) { return n <= -3 ? "ALBATROSS" : n === -2 ? "EAGLE" : n === -1 ? "BIRDIE" : n === 0 ? "EVEN PAR" : n === 1 ? "BOGEY" : n === 2 ? "DOUBLE BOGEY" : golf(n); }
+  function dayScore() { var t = 0, any = false; STATES.forEach(function (st, i) { var s = score(st, ROUNDS[i]); if (s !== null) { t += s; any = true; } }); return any ? t : null; }
   function played() { return STATES.filter(function (st) { return st && st.done; }).length; }
+  // the day's card: strokes and par added up over the tapes finished so far (an ejected tape counts as par + 6)
+  function strokesOf(st, r) { return !st || !st.done ? null : st.solved ? st.strokes : r.par + EJECT + 1; }
+  function dayTotals() {
+    var t = { strokes: 0, par: 0, done: 0, allPar: 0 };
+    STATES.forEach(function (st, i) { var r = ROUNDS[i]; t.allPar += r.par; if (st && st.done) { t.done++; t.par += r.par; t.strokes += strokesOf(st, r); } });
+    t.score = t.done ? t.strokes - t.par : null; t.all = t.done === ROUNDS.length;
+    return t;
+  }
   function firstOpen() { for (var i = 0; i < STATES.length; i++) if (!STATES[i].done) return i; return ROUNDS.length - 1; }
+  function moves(st) { return st.path.length - 1; }
   useRound(firstOpen());
 
   /* ================= tapes and their covers ================= */
   var INKS = ["#8d8650", "#b8321f", "#6a4fd0", "#3a4fd6", "#e6dcae"];
-  var TAPES = ROUNDS.map(function (r, i) { return { id: "r" + i, ri: i, ink: r.ink || INKS[i % INKS.length], title: r.headline, no: "No. " + (i + 1), photo: /suzanne vega/i.test(r.holeTitle || "") }; });
+  var LEVELS = ["EASY", "MEDIUM", "HARD"];
+  var TAPES = ROUNDS.map(function (r, i) { return { id: "r" + i, ri: i, ink: r.ink || INKS[i % INKS.length], start: r.start, target: r.target, par: r.par, level: r.level || LEVELS[i] || "", no: "No. " + (i + 1) }; });
   var TODAY = RI, focus = TODAY;
-  var photoImg = null;
-  function loadPhoto() {
-    return new Promise(function (res) {
-      if (!PHOTO || PHOTO.indexOf("data:") !== 0) return res(null);
-      var im = new Image(); im.onload = function () { photoImg = im; res(im); }; im.onerror = function () { res(null); }; im.src = PHOTO;
-    });
-  }
   // keep f+i and f+l as separate letters in any pixel font that would join them into one glyph
   function nolig(t) { return String(t).replace(/f(?=[filtj])/g, "f\u200C"); }
   function plainLetters(ctx) {
@@ -227,20 +313,6 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     f.lines.forEach(function (l) { cline(x, l, cx, y, f.size); y += f.lh; });
     x.restore();
   }
-  function halftone(x, img, fx, fy, fw, fh, ink) {
-    var o = document.createElement("canvas"), ow = 110, oh = Math.round(110 * fh / fw); o.width = ow; o.height = oh;
-    var ox = o.getContext("2d"), ir = img.width / img.height, fr = ow / oh, sw, sh, sx, sy;
-    if (ir > fr) { sh = img.height; sw = sh * fr; sx = (img.width - sw) / 2; sy = 0; } else { sw = img.width; sh = sw / fr; sx = 0; sy = (img.height - sh) * 0.2; }
-    ox.drawImage(img, sx, sy, sw, sh, 0, 0, ow, oh);
-    var data = ox.getImageData(0, 0, ow, oh).data, step = fw / ow;
-    x.fillStyle = "#0e0e0f"; x.fillRect(fx, fy, fw, fh); x.fillStyle = ink;
-    for (var yy = 0; yy < oh; yy++) for (var xx = 0; xx < ow; xx++) {
-      var k = (yy * ow + xx) * 4, l = (0.3 * data[k] + 0.59 * data[k + 1] + 0.11 * data[k + 2]) / 255;
-      l = Math.min(1, Math.max(0, (l - 0.1) * 1.5));
-      var rr = step * 0.58 * Math.sqrt(l);
-      if (rr > 0.35) { x.beginPath(); x.arc(fx + (xx + .5) * step, fy + (yy + .5) * step, rr, 0, Math.PI * 2); x.fill(); }
-    }
-  }
   function drawCover(t, idx) {
     var W = 640, H = 1120, c = document.createElement("canvas"); c.width = W; c.height = H;
     var x = plainLetters(c.getContext("2d")), r = rnd(idx * 977 + 13), i;
@@ -252,21 +324,22 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     x.fillStyle = t.ink; x.textBaseline = "alphabetic";
     x.font = '600 15px "Handjet", ui-monospace, monospace'; var lab = "W H I T E   R A B B I T"; x.fillText(lab, W / 2 - x.measureText(lab).width / 2, 84);
     x.font = 'italic 500 40px "Handjet", ui-monospace, monospace'; var hv = "Home Video"; x.fillText(hv, W / 2 - x.measureText(hv).width / 2, 134);
-    var stretch = 1.32, top = 176, bottom = H - 150, maxW = W - 96;
-    if (t.photo && photoImg) {
-      var words = t.title.split(/\s+/), cut = Math.ceil(words.length * 0.4), fy = 448, fh = 330, fx = 100, fw = W - 200;
-      halftone(x, photoImg, fx, fy, fw, fh, t.ink);
-      x.strokeStyle = t.ink; x.lineWidth = 2; x.globalAlpha = .75; x.strokeRect(fx, fy, fw, fh); x.globalAlpha = 1;
-      cblock(x, words.slice(0, cut).join(" "), W / 2, top, maxW, fy - top - 16, stretch, 170);
-      cblock(x, words.slice(cut).join(" "), W / 2, fy + fh + 14, maxW, bottom - (fy + fh + 14), stretch, 170);
-    } else cblock(x, t.title, W / 2, top + 8, maxW, bottom - top - 16, stretch, 200);
+    // the start at the top, a dotted line down, the target at the bottom
+    var stretch = 1.32, maxW = W - 96;
+    cblock(x, t.start, W / 2, 178, maxW, 300, stretch, 170);
+    x.fillStyle = t.ink;
+    for (var dy = 0; dy < 176; dy += 16) x.fillRect(W / 2 - 3, 500 + dy, 6, 8);
+    x.font = '600 30px "Handjet", ui-monospace, monospace'; var pl = "PAR " + t.par, pw = x.measureText(pl).width;
+    x.fillStyle = "#18181a"; x.fillRect(W / 2 - pw / 2 - 14, 566, pw + 28, 44); x.strokeStyle = t.ink; x.lineWidth = 2; x.strokeRect(W / 2 - pw / 2 - 14, 566, pw + 28, 44);
+    x.fillStyle = t.ink; x.fillText(pl, W / 2 - pw / 2, 599);
+    cblock(x, t.target, W / 2, 692, maxW, H - 160 - 692, stretch, 170);
     x.strokeStyle = t.ink; x.fillStyle = t.ink; x.lineWidth = 2;
     x.strokeRect(54, H - 120, 94, 48); x.font = 'italic 600 36px "Handjet", ui-monospace, monospace'; x.fillText("VHS", 66, H - 83);
     x.font = '500 18px "Handjet", ui-monospace, monospace'; var no = t.no.toUpperCase(); x.fillText(no, W / 2 - x.measureText(no).width / 2, H - 88);
     x.beginPath(); x.arc(W - 96, H - 96, 30, 0, Math.PI * 2); x.stroke();
     x.beginPath(); x.ellipse(W - 96, H - 96, 13, 30, 0, 0, Math.PI * 2); x.stroke();
     x.beginPath(); x.moveTo(W - 126, H - 96); x.lineTo(W - 66, H - 96); x.stroke();
-    if (t.soon) { x.save(); x.translate(W - 190, 246); x.rotate(0.1); x.fillStyle = "#e9e4d6"; x.fillRect(0, -36, 130, 50); x.fillStyle = "#151515"; x.font = '600 24px "Handjet", ui-monospace, monospace'; x.fillText("SOON", 30, -2); x.restore(); }
+    if (t.level) { x.save(); x.translate(W - 182, 116); x.rotate(0.1); x.font = '600 24px "Handjet", ui-monospace, monospace'; var lw = x.measureText(t.level).width + 44; x.fillStyle = "#e9e4d6"; x.fillRect(0, -36, lw, 50); x.fillStyle = "#151515"; x.fillText(t.level, 22, -2); x.restore(); }
     for (i = 0; i < 650; i++) {
       var side = Math.floor(r() * 4), d = Math.pow(r(), 2.6) * 16, p = r();
       var px = side === 0 ? p * W : side === 1 ? W - d : side === 2 ? p * W : d;
@@ -278,11 +351,11 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     for (i = 0; i < 6; i++) { x.fillStyle = "rgba(0,0,0," + (0.12 + r() * 0.22) + ")"; x.beginPath(); x.ellipse(r() * W, r() * H, 20 + r() * 80, 8 + r() * 30, r() * 3, 0, Math.PI * 2); x.fill(); }
     return c;
   }
-  function drawSide(ink) {
+  function drawSide(t) {
     var c = document.createElement("canvas"); c.width = 64; c.height = 1120; var x = plainLetters(c.getContext("2d"));
     x.fillStyle = "#151516"; x.fillRect(0, 0, 64, 1120);
     x.fillStyle = "rgba(255,255,255,.07)"; x.fillRect(0, 0, 3, 1120); x.fillRect(61, 0, 3, 1120);
-    x.save(); x.translate(40, 1060); x.rotate(-Math.PI / 2); x.fillStyle = ink; x.globalAlpha = .8; x.font = '600 20px "Handjet", ui-monospace, monospace'; x.fillText("WHITE RABBIT · ECHO · THE WORD · VHS", 0, 0); x.restore();
+    x.save(); x.translate(40, 1060); x.rotate(-Math.PI / 2); x.fillStyle = t.ink; x.globalAlpha = .8; x.font = '600 20px "Handjet", ui-monospace, monospace'; x.fillText("WHITE RABBIT · NO CLICKING · " + (t.level ? t.level + " · " : "") + "VHS", 0, 0); x.restore();
     return c;
   }
   function drawCassette() {
@@ -306,7 +379,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   var FF = { vcr: "label", serif: "display", mono: "body", hand: "note", logo: "logo" };
   var ROLE = { label: "600", display: "500", body: "400", note: "italic 400", logo: "italic 800" };
   var SCALE = { label: 1.15, display: 1.12, body: 1.24, note: 1.12, logo: 1.15 }; // Handjet runs narrow and small, so each role sizes up a little
-  var ui = { load: 0, loadDone: false, safeT: 0, safeB: 0, cv: document.createElement("canvas"), W: 0, H: 0, pr: 1, hits: [], scroll: 0, maxScroll: 0, view: "shelf", dirty: true, nosig: 0, bw: false, copied: "", free: "", input: "", inputFocus: false, gl: false };
+  var ui = { load: 0, loadDone: false, safeT: 0, safeB: 0, cv: document.createElement("canvas"), W: 0, H: 0, pr: 1, hits: [], scroll: 0, maxScroll: 0, view: "shelf", dirty: true, bw: false, copied: "", free: "", input: "", inputFocus: false, gl: false };
   var X = plainLetters(ui.cv.getContext("2d"));
 
   function font(size, fam, pre) { X.font = (pre || ROLE[fam] || "400") + " " + Math.round(size * (SCALE[fam] || 1)) + "px " + PIX; }
@@ -315,10 +388,13 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     X.fillStyle = o.color || COL.osd; X.textAlign = o.align || "left"; X.textBaseline = "alphabetic";
     if (o.glow !== 0) { X.shadowColor = o.glowColor || "rgba(220,216,206,.4)"; X.shadowBlur = Math.min(o.glow || 3, 4) * ui.pr; }
     X.fillText(s, x, y); X.shadowBlur = 0;
-    var w = X.measureText(s).width; X.textAlign = "left"; return w;
+    var w = X.measureText(s).width; X.textAlign = "left";
+    if (o.terms) termMarks(s, o.align === "center" ? x - w / 2 : o.align === "right" ? x - w : x, y, Math.round((o.size || 20) * (SCALE[o.fam || FF.vcr] || 1)), o);
+    return w;
   }
   function W_(s, size, fam, pre) { font(size, fam, pre); return X.measureText(s).width; }
-  function hit(id, x, y, w, h, kind, opt) { ui.hits.push(Object.assign({ id: id, x: x, y: y, w: w, h: h, kind: kind }, opt || {})); }
+  // while the how-to-play box is up, only its own controls (and the terms in it) take clicks
+  function hit(id, x, y, w, h, kind, opt) { if (ui.modal && !ui.inModal) return; ui.hits.push(Object.assign({ id: id, x: x, y: y, w: w, h: h, kind: kind, fixed: ui.inModal }, opt || {})); }
   function richW(s, blankW) { return String(s).split(/(_{3,})/).reduce(function (w, p) { return w + (/^_{3,}$/.test(p) ? blankW : p ? X.measureText(p).width : 0); }, 0); }
   function wrap(s, maxW, blankW) {
     var words = String(s).split(/\s+/).filter(Boolean), lines = [], cur = "";
@@ -341,37 +417,158 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     if (o.glow) { X.shadowColor = "rgba(220,216,206,.35)"; X.shadowBlur = o.glow * ui.pr; }
     lines.forEach(function (l, i) { drawRich(l, x, y + o.size + i * lh, o.size, blankW, o.color); });
     X.shadowBlur = 0;
+    if (o.terms) lines.forEach(function (l, i) { font(o.size, o.fam, o.pre); termMarks(l, x, y + o.size + i * lh, Math.round(o.size * (SCALE[o.fam] || 1)), o); });
     return lines.length * lh + (lh - o.size) * .2;
   }
+  /* --- words of the game: a dotted underline, and a definition on hover or tap --- */
+  var GLOSSARY = [
+    { k: "END lamp", re: /\bEND lamp\b/, d: "Lights up when the page you're on connects to the target. Then the target itself is your next step." },
+    { k: "RABBIT lamp", re: /\bRABBIT lamp\b/, d: "Lights up when you're on a page of the real rabbit hole this tape came from." },
+    { k: "even par", re: /\beven par\b/i, d: "The same number of strokes as the rabbit took." },
+    { k: "double bogey", re: /\bdouble bogey\b/i, d: "Two strokes over par." },
+    { k: "bogey", re: /\bbogey\b/i, d: "One stroke over par." },
+    { k: "birdie", re: /\bbirdie\b/i, d: "One stroke under par: you beat the rabbit." },
+    { k: "eagle", re: /\beagle\b/i, d: "Two strokes under par." },
+    { k: "par", re: /\bpar\b/i, d: "How many steps the real rabbit hole took. Finish in fewer strokes and you beat the rabbit." },
+    { k: "stroke", re: /\bstrokes?\b/i, d: "Each step costs one, and so does each miss and each TRACKING. Fewer is better, like golf." },
+    { k: "static", re: /\bstatic\b/i, d: "A guess that doesn't connect to the page you're on. It costs a stroke." },
+    { k: "referee", re: /\breferee\b/i, d: "A small AI that judges a step Wikipedia doesn't settle: would most people see a clear connection between the two?" },
+    { k: "by association", re: /\bby association\b/i, d: "Wikipedia doesn't link the two pages, but the referee says most people would see the connection." },
+    { k: "TRACKING", re: /\btracking\b/i, d: "Costs a stroke. Names a page linked from here that's one step from the target." },
+    { k: "REWIND", re: /\brewind\b/i, d: "Steps back one page for free. Strokes already spent stay spent." },
+    { k: "too broad", re: /\btoo broad\b/i, d: "Years, dates and lists connect to almost everything, so they don't count. No stroke." },
+    { k: "not found", re: /\bnot found\b/i, d: "No Wikipedia page goes by that name. It's free: try another name for it." },
+    { k: "eject", re: /\beject(s|ed)?\b/i, d: "Use par + 5 strokes without reaching the target and the tape ejects and plays the rabbit's route." },
+    { k: "rabbit hole", re: /\brabbit hole\b/i, d: "A trail of Wikipedia pages someone on White Rabbit really followed. Each tape is made from one." }
+  ];
+  // the Wikipedia pages this tape has put on screen: they explain themselves too ("Oramics: a drawn sound technique…")
+  var PAGE_TERMS = {};
+  function pageTerms() {
+    if (ui.view !== "play" || !ST) return [];
+    var seen = {}, out = [];
+    function add(t) { if (t && t.length >= 3 && !seen[t]) { seen[t] = 1; out.push(PAGE_TERMS[t] || (PAGE_TERMS[t] = { k: t, page: true, re: new RegExp("(^|[^A-Za-z0-9])(" + esc(t) + ")(?![A-Za-z0-9])", "gi") })); } }
+    [R.start, R.target].concat(ST.path, R.hole.route.map(function (h) { return h.t; })).forEach(add);
+    ST.log.forEach(function (r) { add(r.at); add(r.to); add(r.via); add(r.far); });
+    return out.sort(function (a, b) { return b.k.length - a.k.length; });
+  }
+  function aboutPage(t) {
+    if (ABOUT[t] !== undefined) return;
+    ABOUT[t] = null;
+    wiki({ prop: "extracts|description", titles: t, exintro: 1, explaintext: 1, exsentences: 2, redirects: 1 }).then(function (j) {
+      var p = j.query.pages[0] || {}, d = (p.description || "").trim(), x = (p.extract || "").replace(/\s+/g, " ").trim(), first = (x.match(/^.*?[.!?](?=\s+[A-Z]|$)/) || [x])[0];
+      ABOUT[t] = ((d ? d.charAt(0).toUpperCase() + d.slice(1) + ". " : "") + first).slice(0, 300) || "No summary on Wikipedia.";
+      ui.dirty = true; kick();
+    }, function () { delete ABOUT[t]; });
+  }
+  function termsIn(line) {
+    var found = [];
+    GLOSSARY.forEach(function (g) {
+      var re = new RegExp(g.re.source, g.re.flags.indexOf("i") >= 0 ? "gi" : "g"), m;
+      while ((m = re.exec(line))) found.push({ s: m.index, e: m.index + m[0].length, g: g });
+    });
+    (ui.pageTerms || []).forEach(function (g) {
+      var m; g.re.lastIndex = 0;
+      while ((m = g.re.exec(line))) { var s0 = m.index + m[1].length; found.push({ s: s0, e: s0 + m[2].length, g: g }); }
+    });
+    found.sort(function (a, b) { return a.s - b.s || (b.e - b.s) - (a.e - a.s); });
+    return found.filter(function (t, i) { return !found.slice(0, i).some(function (u) { return u.s < t.e && t.s < u.e; }); });
+  }
+  // underline each glossary word in a line already drawn at (x, baseline y), and make it a hover/tap target
+  function termMarks(line, x, y, px, o) {
+    termsIn(line).forEach(function (t) {
+      var x0 = x + X.measureText(line.slice(0, t.s)).width, w = X.measureText(line.slice(t.s, t.e)).width;
+      X.save(); X.setLineDash([2, 3]); X.strokeStyle = (o && o.underline) || (t.g.page ? "rgba(214,211,203,.5)" : "rgba(230,220,174,.75)"); X.lineWidth = 1.2;
+      X.beginPath(); X.moveTo(x0, y + px * .2); X.lineTo(x0 + w, y + px * .2); X.stroke(); X.restore();
+      termHit(t.g, x0, y - px * .9, w, px * 1.25, o && o.fixed);
+    });
+  }
+  function termHit(g, x, y, w, h, fixed) {
+    var rect = { x: x, y: y, w: w, h: h };
+    hit("term-" + (ui.termN++), x - 2, y, w + 4, h, "button", { label: (g.page ? "What is " : "What's ") + g.k + "?", term: true, fixed: fixed || ui.inModal,
+      onClick: function () { var on = ui.tip && ui.tip.g === g; ui.tip = on && !ui.tip.hover ? null : { g: g, r: rect, hover: false }; ui.dirty = true; kick(); },
+      onEnter: function () { if (!ui.tip || ui.tip.hover) { ui.tip = { g: g, r: rect, hover: true }; ui.dirty = true; kick(); } },
+      onLeave: function () { if (ui.tip && ui.tip.hover && ui.tip.g === g) { ui.tip = null; ui.dirty = true; kick(); } } });
+  }
+  function drawTip() {
+    var t = ui.tip; if (!t) return;
+    var def = t.g.page ? ABOUT[t.g.k] : t.g.d;
+    if (t.g.page && def === undefined) aboutPage(t.g.k);
+    def = def || "Looking it up on Wikipedia…";
+    var W = ui.W, pad = 14, bw = Math.min(330, W - 32), r = t.r;
+    font(15, FF.mono, "500"); var lines = wrap(def, bw - pad * 2, 0), bh = 30 + lines.length * 22 + pad;
+    var bx = Math.max(16, Math.min(W - 16 - bw, r.x + r.w / 2 - bw / 2)), by = r.y + r.h + 8;
+    if (by + bh > ui.H - 16 - ui.safeB) by = r.y - bh - 8;
+    X.fillStyle = "#18181a"; X.fillRect(bx, by, bw, bh); X.strokeStyle = COL.ink; X.lineWidth = 1.5; X.strokeRect(bx + .75, by + .75, bw - 1.5, bh - 1.5);
+    font(18, FF.vcr); var head = t.g.k.toUpperCase(); while (X.measureText(head).width > bw - pad * 2 && head.length > 4) head = head.slice(0, -2) + "…";
+    T(head, bx + pad, by + 24, { size: 18, color: COL.ink, glow: 0 });
+    para(def, bx + pad, by + 28, bw - pad * 2, { size: 15, fam: FF.mono, pre: "500", color: COL.osd, lh: 22 });
+  }
+  function helpSeen() { try { return localStorage.getItem("wr-noclick:help") === "1"; } catch (e) { return true; } }
+  function openHelp() { ui.modal = "help"; ui.tip = null; ui.dirty = true; flash(); kick(); }
+  function closeHelp() { ui.modal = null; ui.tip = null; try { localStorage.setItem("wr-noclick:help", "1"); } catch (e) {} ui.dirty = true; kick(); }
+  // how to play, as a box over the tape; the X (or GOT IT, or Escape) closes it
+  function drawModal() {
+    var W = ui.W, H = ui.H, narrow = W < 760, pad = narrow ? 18 : 28;
+    var pw = Math.min(660, W - (narrow ? 28 : 80)), px = (W - pw) / 2, iw = pw - pad * 2, fs = narrow ? 15 : 17, lh = narrow ? 22 : 26;
+    var tg = title(R.target), st = title(R.start);
+    var body = [
+      "Get from " + st + " to " + tg + ", one connection at a time. Nothing to click: type anything.",
+      "• A step counts when its Wikipedia page and the one you're on link or name each other, or when the referee sees a clear connection: nutmeg → nuts → squirrel → animal.",
+      "• Each step is a stroke. Par is " + R.par + ", the steps the real rabbit hole took. Fewer strokes beats the rabbit.",
+      "• A guess that connects nothing is static and costs a stroke too. Names Wikipedia doesn't know, and years, dates and lists (too broad), are free.",
+      "• Stuck? TRACKING (+1 stroke) names a page that leads toward " + tg + ". REWIND steps back a page for free.",
+      "• The END lamp lights on a page that connects to " + tg + "; the RABBIT lamp on a page of the real rabbit hole.",
+      "Underlined words explain themselves: hover or tap them."
+    ];
+    font(fs, FF.mono, "500");
+    var bodyH = body.reduce(function (h, p) { return h + wrap(p, iw, 0).length * lh + (lh - fs) * .2 + 8; }, 0);
+    var ph = pad + 34 + 16 + bodyH + 12 + 50 + pad, py = Math.max(ui.safeT + 16, (H - ph) / 2);
+    X.fillStyle = "rgba(3,3,4,.8)"; X.fillRect(0, 0, W, H);
+    ui.inModal = true;
+    X.fillStyle = "#121213"; X.fillRect(px, py, pw, ph); X.strokeStyle = COL.osd; X.lineWidth = 1.5; X.strokeRect(px + .75, py + .75, pw - 1.5, ph - 1.5);
+    T("HOW TO PLAY", px + pad, py + pad + 26, { size: narrow ? 28 : 32, color: COL.white, glow: 4 });
+    var xs = 40; X.strokeStyle = COL.osd; X.lineWidth = 1.5; X.strokeRect(px + pw - pad - xs + .75, py + pad - 4 + .75, xs - 1.5, xs - 1.5);
+    X.lineWidth = 2; X.beginPath(); X.moveTo(px + pw - pad - xs + 12, py + pad + 8); X.lineTo(px + pw - pad - 12, py + pad - 4 + xs - 12); X.moveTo(px + pw - pad - 12, py + pad + 8); X.lineTo(px + pw - pad - xs + 12, py + pad - 4 + xs - 12); X.stroke();
+    hit("modal-x", px + pw - pad - xs, py + pad - 4, xs, xs, "button", { label: "Close how to play", onClick: closeHelp });
+    var y = py + pad + 34 + 16;
+    body.forEach(function (p, i) { y += para(p, px + pad, y, iw, { size: fs, fam: FF.mono, pre: "500", color: i === body.length - 1 ? COL.dim : COL.osd, lh: lh, terms: true }) + 8; });
+    button("modal-ok", "GOT IT ▶", px + pad, y + 12, iw, 50, { primary: true, onClick: closeHelp, label: "Got it, close how to play" });
+    ui.inModal = false;
+  }
+
+  // a reply's colour square: green a move, yellow a free near-miss, white static, orange a TRACKING
   function sq(kind, x, y, s) {
-    if (kind === "r") { X.strokeStyle = COL.dim; X.lineWidth = 1.5; X.strokeRect(x + .75, y + .75, s - 1.5, s - 1.5); X.fillStyle = COL.dim; X.fillRect(x + s * .3, y + s * .3, s * .4, s * .4); return; }
-    var c = kind === "found" ? COL.found : kind === "e" ? COL.e : kind === "c" ? COL.c : kind === "t" ? null : kind === "flip" ? COL.flip : COL.cold;
-    if (c) { X.fillStyle = c; X.fillRect(x, y, s, s); X.fillStyle = "rgba(0,0,0,.2)"; X.fillRect(x, y + s * .82, s, s * .18); }
-    else { X.strokeStyle = COL.ink; X.lineWidth = 1.5; X.strokeRect(x + .75, y + .75, s - 1.5, s - 1.5); font(Math.round(s * .62), "sans-serif"); X.fillStyle = COL.ink; X.textAlign = "center"; X.fillText("🐇", x + s / 2, y + s * .78); X.textAlign = "left"; }
+    if (kind === "rewind" || kind === "dym") { X.strokeStyle = COL.dim; X.lineWidth = 1.5; X.strokeRect(x + .75, y + .75, s - 1.5, s - 1.5); X.fillStyle = COL.dim; X.fillRect(x + s * .3, y + s * .3, s * .4, s * .4); return; }
+    var c = kind === "move" ? COL.found : kind === "close" || kind === "off" || kind === "broad" ? COL.e : kind === "track" ? COL.c : COL.cold;
+    X.fillStyle = c; X.fillRect(x, y, s, s); X.fillStyle = "rgba(0,0,0,.2)"; X.fillRect(x, y + s * .82, s, s * .18);
   }
   function button(id, label, x, y, w, h, o) {
     o = o || {};
     if (o.primary) { X.fillStyle = "#ece8de"; X.fillRect(x, y, w, h); T(label, x + w / 2, y + h * .68, { size: o.size || 24, color: "#121212", align: "center", glow: 0 }); }
     else { X.strokeStyle = COL.osd; X.lineWidth = 1.5; X.strokeRect(x + .75, y + .75, w - 1.5, h - 1.5); T(label, x + w / 2, y + h * .68, { size: o.size || 24, color: COL.osd, align: "center" }); }
     if (ui.focusId === id) { X.strokeStyle = COL.ink; X.lineWidth = 2; X.strokeRect(x - 4, y - 4, w + 8, h + 8); }
-    hit(id, x, y, w, h, o.href ? "link" : "button", { label: o.label || label, href: o.href, onClick: o.onClick });
+    var g = o.term ? GLOSSARY.filter(function (e) { return e.k === o.term; })[0] : null, rect = { x: x, y: y, w: w, h: h };
+    hit(id, x, y, w, h, o.href ? "link" : "button", { label: o.label || label, href: o.href, onClick: o.onClick, fixed: o.fixed,
+      onEnter: g ? function () { if (!ui.tip || ui.tip.hover) { ui.tip = { g: g, r: rect, hover: true }; ui.dirty = true; kick(); } } : null,
+      onLeave: g ? function () { if (ui.tip && ui.tip.hover && ui.tip.g === g) { ui.tip = null; ui.dirty = true; kick(); } } : null });
   }
   function pad2(n) { return (n < 10 ? "0" : "") + n; }
   var start = Date.now();
 
+  // The White Rabbit mark (src/components/brand/logo.tsx in the app), 917×917 box
+  var MARK = new Path2D("M 425.5 18.5 Q 425 18 417.5 18.5 Q 410 19 404.5 21 Q 399 23 394.5 27 Q 390 31 387.5 35.5 Q 385 40 384 43.5 Q 383 47 383 49.5 Q 383 52 382.5 52.5 Q 382 53 382 69.5 Q 382 86 382.5 86.5 Q 383 87 383 91 Q 383 95 383.5 95.5 Q 384 96 384 99 Q 384 102 384.5 102.5 Q 385 103 385 105.5 Q 385 108 387 115.5 Q 389 123 389 125 Q 389 127 393 140 Q 397 153 396.5 154 Q 396 155 375.5 148 Q 355 141 342 138 Q 329 135 319 134 Q 309 133 308.5 132.5 Q 308 132 303 132 Q 298 132 297.5 131.5 Q 297 131 282 131 Q 267 131 266.5 131.5 Q 266 132 262.5 132 Q 259 132 258.5 132.5 Q 258 133 253.5 133.5 Q 249 134 241.5 137.5 Q 234 141 230.5 144.5 Q 227 148 225.5 151 Q 224 154 223 161 Q 222 168 222.5 168.5 Q 223 169 223.5 175 Q 224 181 226.5 188 Q 229 195 237 211.5 Q 245 228 256 244.5 Q 267 261 280.5 276 Q 294 291 309 304 Q 324 317 342.5 330 Q 361 343 375.5 351.5 Q 390 360 408 369 Q 426 378 427 378 Q 428 378 438.5 383 Q 449 388 452 391 Q 455 394 455.5 397 Q 456 400 453 403 Q 450 406 446 406.5 Q 442 407 441.5 407.5 Q 441 408 418.5 408 Q 396 408 395.5 408.5 Q 395 409 389 409 Q 383 409 382.5 409.5 Q 382 410 378 410 Q 374 410 373.5 410.5 Q 373 411 369.5 411 Q 366 411 365.5 411.5 Q 365 412 356.5 413 Q 348 414 333.5 417.5 Q 319 421 300 428 Q 281 435 266.5 442.5 Q 252 450 240.5 457.5 Q 229 465 221.5 471 Q 214 477 202 489 Q 190 501 184 508.5 Q 178 516 171 526.5 Q 164 537 157 551 Q 150 565 145.5 577.5 Q 141 590 137.5 605 Q 134 620 134 623.5 Q 134 627 133.5 627.5 Q 133 628 133 631.5 Q 133 635 132.5 635.5 Q 132 636 132 655.5 Q 132 675 132.5 675.5 Q 133 676 133 680.5 Q 133 685 133.5 685.5 Q 134 686 134 689 Q 134 692 134.5 692.5 Q 135 693 136 701 Q 137 709 139.5 719 Q 142 729 148 745 Q 154 761 159.5 771.5 Q 165 782 172 792.5 Q 179 803 186 811.5 Q 193 820 199.5 826.5 Q 206 833 215 840.5 Q 224 848 233.5 854.5 Q 243 861 255 867.5 Q 267 874 268 874 Q 269 874 277.5 878 Q 286 882 305 887.5 Q 324 893 332 894 Q 340 895 340.5 895.5 Q 341 896 344 896 Q 347 896 347.5 896.5 Q 348 897 351.5 897 Q 355 897 355.5 897.5 Q 356 898 362 898 Q 368 898 368.5 898.5 Q 369 899 393 898.5 Q 417 898 417.5 897.5 Q 418 897 422 897 Q 426 897 426.5 896.5 Q 427 896 435.5 895 Q 444 894 454.5 891.5 Q 465 889 482 883 Q 499 877 510 871.5 Q 521 866 534.5 857 Q 548 848 554.5 842.5 Q 561 837 568 830 Q 575 823 579.5 817.5 Q 584 812 591 801.5 Q 598 791 602.5 782 Q 607 773 610.5 763.5 Q 614 754 616 745.5 Q 618 737 618.5 729.5 Q 619 722 619.5 721.5 Q 620 721 620 711 Q 620 701 619.5 700.5 Q 619 700 618.5 692.5 Q 618 685 616 677 Q 614 669 611 661 Q 608 653 604.5 646 Q 601 639 596.5 632 Q 592 625 584.5 616 Q 577 607 564.5 596 Q 552 585 544.5 580 Q 537 575 524.5 568.5 Q 512 562 499.5 557.5 Q 487 553 476.5 551 Q 466 549 465.5 548.5 Q 465 548 457 547.5 Q 449 547 448.5 546.5 Q 448 546 434 546 Q 420 546 419.5 546.5 Q 419 547 411.5 547.5 Q 404 548 389 552 Q 374 556 366 559.5 Q 358 563 350.5 567.5 Q 343 572 338.5 575.5 Q 334 579 326 587 Q 318 595 311.5 604.5 Q 305 614 302.5 619 Q 300 624 296.5 634 Q 293 644 292 652 Q 291 660 290.5 660.5 Q 290 661 290 674 Q 290 687 290.5 687.5 Q 291 688 291 691 Q 291 694 293 702.5 Q 295 711 299 720.5 Q 303 730 308 737.5 Q 313 745 318.5 750.5 Q 324 756 329.5 760 Q 335 764 341 767 Q 347 770 355.5 772.5 Q 364 775 367.5 775 Q 371 775 371.5 775.5 Q 372 776 383.5 776 Q 395 776 395.5 775.5 Q 396 775 399 775 Q 402 775 407.5 773.5 Q 413 772 420 768.5 Q 427 765 433.5 758.5 Q 440 752 443 745.5 Q 446 739 446.5 737 Q 447 735 447 728.5 Q 447 722 446 718 Q 445 714 443.5 711 Q 442 708 437 702.5 Q 432 697 429 695 Q 426 693 420.5 691 Q 415 689 412 689 Q 409 689 408.5 688.5 Q 408 688 403.5 688 Q 399 688 392.5 689.5 Q 386 691 382 693 Q 378 695 374 698 Q 370 701 368 698.5 Q 366 696 364 690 Q 362 684 362 676 Q 362 668 362.5 667.5 Q 363 667 363 665 Q 363 663 364 660 Q 365 657 369.5 649 Q 374 641 382.5 633 Q 391 625 397 621.5 Q 403 618 411 615 Q 419 612 423 611 Q 427 610 429.5 610 Q 432 610 432.5 609.5 Q 433 609 446.5 609 Q 460 609 460.5 609.5 Q 461 610 468 611 Q 475 612 482 614.5 Q 489 617 494 619.5 Q 499 622 508 628.5 Q 517 635 522 640 Q 527 645 532 651.5 Q 537 658 541 665.5 Q 545 673 547.5 680 Q 550 687 550 689 Q 550 691 551 694 Q 552 697 552 700.5 Q 552 704 552.5 704.5 Q 553 705 553 712 Q 553 719 552.5 719.5 Q 552 720 551 728.5 Q 550 737 547.5 744.5 Q 545 752 541 760 Q 537 768 530.5 777 Q 524 786 516.5 793.5 Q 509 801 504 805 Q 499 809 491 814 Q 483 819 472 824 Q 461 829 447 833 Q 433 837 424 838 Q 415 839 414.5 839.5 Q 414 840 393 840.5 Q 372 841 371.5 840.5 Q 371 840 362 839.5 Q 353 839 352.5 838.5 Q 352 838 349.5 838 Q 347 838 342 836.5 Q 337 835 335 835 Q 333 835 322 831.5 Q 311 828 300 823 Q 289 818 280 812.5 Q 271 807 264.5 802 Q 258 797 248.5 787.5 Q 239 778 232 768.5 Q 225 759 217.5 744.5 Q 210 730 205.5 716.5 Q 201 703 201 701 Q 201 699 199 691.5 Q 197 684 197 680 Q 197 676 196.5 675.5 Q 196 675 195.5 659 Q 195 643 195.5 642.5 Q 196 642 196 637.5 Q 196 633 196.5 632.5 Q 197 632 198 624 Q 199 616 202.5 605 Q 206 594 212 581.5 Q 218 569 225.5 558 Q 233 547 246 533.5 Q 259 520 264.5 515.5 Q 270 511 284 502 Q 298 493 312 486.5 Q 326 480 336.5 476.5 Q 347 473 360 470 Q 373 467 378.5 466.5 Q 384 466 384.5 465.5 Q 385 465 393.5 464.5 Q 402 464 402.5 463.5 Q 403 463 410 463 Q 417 463 417.5 462.5 Q 418 462 438 461.5 Q 458 461 468.5 458 Q 479 455 486 451 Q 493 447 499.5 441 Q 506 435 509 430.5 Q 512 426 512 425 Q 512 424 513.5 421.5 Q 515 419 515.5 415 Q 516 411 516.5 410.5 Q 517 410 516.5 402 Q 516 394 512.5 386.5 Q 509 379 500 369.5 Q 491 360 479.5 352.5 Q 468 345 451.5 336.5 Q 435 328 419.5 319 Q 404 310 393.5 303 Q 383 296 371.5 287 Q 360 278 347.5 266 Q 335 254 326.5 244 Q 318 234 308.5 220 Q 299 206 294.5 197 Q 290 188 290.5 187.5 Q 291 187 304 187.5 Q 317 188 317.5 188.5 Q 318 189 327.5 190.5 Q 337 192 347.5 195 Q 358 198 359.5 199 Q 361 200 370 203 Q 379 206 389.5 211 Q 400 216 410.5 222 Q 421 228 430 234 Q 439 240 453.5 251.5 Q 468 263 481.5 276 Q 495 289 505.5 301 Q 516 313 524 323.5 Q 532 334 540.5 347 Q 549 360 553.5 368 Q 558 376 560.5 378.5 Q 563 381 565 382 Q 567 383 570 383 Q 573 383 575 382 Q 577 381 578.5 378.5 Q 580 376 580 370.5 Q 580 365 577.5 357 Q 575 349 571.5 341.5 Q 568 334 568 333 Q 568 332 563 322 Q 558 312 553.5 304.5 Q 549 297 540.5 284.5 Q 532 272 515 250 Q 498 228 485.5 208 Q 473 188 465.5 172 Q 458 156 453.5 143 Q 449 130 447 119.5 Q 445 109 444.5 108.5 Q 444 108 443.5 101.5 Q 443 95 442.5 94.5 Q 442 94 442 89 Q 442 84 441.5 83.5 Q 441 83 441.5 82.5 Q 442 82 444.5 82.5 Q 447 83 455 87 Q 463 91 471.5 96.5 Q 480 102 488 108.5 Q 496 115 509 128.5 Q 522 142 533 157.5 Q 544 173 547.5 180 Q 551 187 552 188 Q 553 189 554 192 Q 555 195 556 196 Q 557 197 557 198 Q 557 199 559.5 203.5 Q 562 208 566 218 Q 570 228 575 243.5 Q 580 259 580.5 262.5 Q 581 266 583 272 Q 585 278 587.5 292 Q 590 306 590.5 306.5 Q 591 307 591 309.5 Q 591 312 591.5 312.5 Q 592 313 593 321 Q 594 329 594.5 329.5 Q 595 330 595 333 Q 595 336 595.5 336.5 Q 596 337 596 340.5 Q 596 344 599 351.5 Q 602 359 606.5 364 Q 611 369 632.5 380.5 Q 654 392 668.5 403 Q 683 414 690.5 421.5 Q 698 429 704 436.5 Q 710 444 715 452 Q 720 460 724.5 470.5 Q 729 481 731.5 491.5 Q 734 502 734 511.5 Q 734 521 732 528 Q 730 535 728 539 Q 726 543 723.5 546.5 Q 721 550 715 556 Q 709 562 703.5 566 Q 698 570 687.5 575.5 Q 677 581 672.5 582.5 Q 668 584 661 588 Q 654 592 652 594.5 Q 650 597 649 599.5 Q 648 602 648 605.5 Q 648 609 649 611.5 Q 650 614 652.5 616.5 Q 655 619 658.5 620.5 Q 662 622 673.5 621.5 Q 685 621 693 619 Q 701 617 708 614.5 Q 715 612 727 605.5 Q 739 599 749 590 Q 759 581 763.5 575 Q 768 569 773 559 Q 778 549 780 542.5 Q 782 536 782.5 530.5 Q 783 525 783.5 524.5 Q 784 524 784 511 Q 784 498 783.5 497.5 Q 783 497 783 493.5 Q 783 490 782.5 489.5 Q 782 489 781 482 Q 780 475 774 459 Q 768 443 760 429.5 Q 752 416 744.5 406.5 Q 737 397 724 384.5 Q 711 372 698.5 363 Q 686 354 676.5 348.5 Q 667 343 659.5 339.5 Q 652 336 649 314.5 Q 646 293 643 281 Q 640 269 640 267 Q 640 265 637.5 255 Q 635 245 634 243 Q 633 241 633 239.5 Q 633 238 632 236 Q 631 234 631 232.5 Q 631 231 627 219 Q 623 207 617 192 Q 611 177 604.5 164 Q 598 151 587 133.5 Q 576 116 565 102.5 Q 554 89 546.5 81.5 Q 539 74 524.5 62.5 Q 510 51 500 45 Q 490 39 477 33 Q 464 27 454 24 Q 444 21 439 20.5 Q 434 20 433.5 19.5 Q 433 19 429.5 19 Q 426 19 425.5 18.5 Z M 643.5 446.5 Q 638 447 634 449 Q 630 451 627 454 Q 624 457 622 461.5 Q 620 466 620 472.5 Q 620 479 623 484.5 Q 626 490 630 493 Q 634 496 637 497 Q 640 498 646 498 Q 652 498 656.5 496 Q 661 494 664.5 490.5 Q 668 487 670 482.5 Q 672 478 672 472.5 Q 672 467 671 464 Q 670 461 668 458 Q 666 455 663 452.5 Q 660 450 654.5 448 Q 649 446 643.5 446.5 Z");
   function drawLogo(cx, y, big) {
-    var s = big ? 46 : 36, bw = big ? 7 : 5.5, bh = big ? 38 : 30, cols = ["#e8423b", "#f08c2c", "#f5d33a", "#6cc070", "#3d8fe0", "#7b55d6"];
-    var wordW = W_("Echo", s, FF.logo, "italic 800"), total = cols.length * bw + 2 + wordW, x0 = cx - total / 2;
-    X.save(); X.translate(x0, y); X.transform(1, 0, -0.5, 1, 0, 0);
-    cols.forEach(function (c, i) { X.fillStyle = c; X.fillRect(i * bw + bh * 0.5, -bh, bw, bh); });
-    X.restore();
-    T("Echo", x0 + cols.length * bw + 2, y, { size: s, fam: FF.logo, pre: "italic 800", color: "#f3f1ec", glow: 8 });
-    X.fillStyle = "#f3f1ec"; X.fillRect(x0 + cols.length * bw + 6, y + 4, wordW - 2, 2.5);
+    var s = big ? 46 : 36, m = big ? 44 : 34, k = m / 917;
+    var wordW = W_(NAME, s, FF.logo, "italic 800"), gap = big ? 8 : 6, total = m + gap + wordW, x0 = cx - total / 2;
+    X.save(); X.translate(x0, y - m * .86); X.scale(k, k);
+    X.fillStyle = "#f3f1ec"; X.shadowColor = "rgba(220,216,206,.4)"; X.shadowBlur = 4 * ui.pr; X.fill(MARK);
+    X.restore(); X.shadowBlur = 0;
+    T(NAME, x0 + m + gap, y, { size: s, fam: FF.logo, pre: "italic 800", color: "#f3f1ec", glow: 8 });
+    X.fillStyle = "#f3f1ec"; X.fillRect(x0 + m + gap + 4, y + 4, wordW - 2, 2.5);
   }
   function drawShelf() {
     var W = ui.W, H = ui.H, narrow = W < 760, mx = W * (narrow ? .1 : .09), my = H * (narrow ? .07 : .09) + ui.safeT;
     var ty = my + 22, fs = narrow ? 20 : 23;
-    var cw1 = W_("CH 01", fs, FF.vcr), cw2 = W_("CH 02", fs, FF.vcr);
     if (!narrow) {
       X.fillStyle = COL.osd; X.fillRect(mx, ty - 13, 11, 11); T("WHITE RABBIT", mx + 18, ty, { size: fs });
       drawLogo(W / 2, ty + 8, true);
@@ -380,19 +577,36 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       ty += 52;
       X.fillStyle = COL.osd; X.fillRect(mx, ty - 12, 10, 10); T("WHITE RABBIT", mx + 16, ty, { size: fs });
     }
-    var c2 = W - mx - cw2, c1 = c2 - (narrow ? 18 : 34) - cw1;
-    T("CH 01", c1, ty, { size: fs, color: ui.nosig ? COL.faint : COL.white, glow: ui.nosig ? 0 : 6 }); hit("ch1", c1 - 6, ty - fs, cw1 + 12, fs + 10, "button", { label: "Channel 1, The Word", onClick: channelOne });
-    T("CH 02", c2, ty, { size: fs, color: ui.nosig ? COL.white : COL.faint, glow: ui.nosig ? 6 : 0 }); hit("ch2", c2 - 6, ty - fs, cw2 + 12, fs + 10, "button", { label: "Channel 2, Down the Hole", onClick: noSignal });
+    // the two games are tabs on the same TV: No Clicking is this page, Archive (the research desk) lives at /desk
+    var tab1 = "NO CLICKING", ts = fs, cw1, cw2;
+    for (; ts > 15; ts--) { cw1 = W_(tab1, ts, FF.vcr); cw2 = ARCHIVE ? W_("ARCHIVE", ts, FF.vcr) : 0; if (!narrow || W_("WHITE RABBIT", fs, FF.vcr) + 16 + 22 + cw1 + 16 + cw2 <= W - mx * 2) break; }
+    var c2 = W - mx - cw2, c1 = ARCHIVE ? c2 - (narrow ? 16 : 34) - cw1 : W - mx - cw1;
+    T(tab1, c1, ty, { size: ts, color: COL.white, glow: 6 }); X.fillStyle = COL.white; X.fillRect(c1, ty + 5, cw1, 2);
+    if (ARCHIVE) { T("ARCHIVE", c2, ty, { size: ts, color: COL.faint, glow: 0 }); hit("tab-archive", c2 - 6, ty - ts, cw2 + 12, ts + 12, "button", { label: "Switch to Archive", onClick: toArchive }); }
     var by = H - my - 4 - ui.safeB + ui.safeT, bs = narrow ? 18 : 21;
     var bwl = "B&W [" + (ui.bw ? "ON" : "OFF") + "]", bww = T(bwl, mx, by, { size: bs }); hit("bw", mx - 6, by - bs, bww + 12, bs + 10, "button", { label: "Black and white", onClick: toggleBW });
     var lw = W_("WHITERABBT.COM ↗", bs, FF.vcr); T("WHITERABBT.COM ↗", W - mx - lw, by, { size: bs }); hit("wr", W - mx - lw - 6, by - bs, lw + 12, bs + 10, "link", { label: "White Rabbit", href: "https://whiterabbt.com" });
-    if (ui.nosig) { drawNoSignal(); return; }
-    var t = TAPES[focus], fst = STATES[t.ri], cs = narrow ? 20 : 22, cy = H - my - (narrow ? 118 : 104);
-    T("TAPE " + (t.ri + 1) + " OF " + ROUNDS.length + " · TODAY " + dayTotal() + "/" + ROUNDS.length * MAX, W / 2, cy, { size: cs, color: COL.rose, align: "center" });
-    T(fst.done ? (fst.solved ? "SOLVED · +" + points(fst) + " POINTS" : "THE BLANK GOT YOU") : "GUESS THE MISSING WORD", W / 2, cy + cs * 1.2, { size: cs, color: COL.white, align: "center" });
-    var label = fst.done ? "SEE TAPE ▶" : fst.raw.length ? "RESUME ▶" : "PLAY ▶";
+    var t = TAPES[focus], fst = STATES[t.ri], r = ROUNDS[t.ri], cs = narrow ? 20 : 22, cy = H - my - (narrow ? 118 : 104);
+    T("TAPE " + (t.ri + 1) + " OF " + ROUNDS.length + " · " + t.level, W / 2, cy, { size: cs, color: COL.rose, align: "center" });
+    // today's running total: "1: +6 (Par 3)   2: E (Par 4)   3: +5 (Par 5)   Total: +11 (Par 12)", on two lines when it won't fit
+    var dt = dayTotals(), dsz = narrow ? 16 : 19, gap = narrow ? "   " : "      ";
+    var cells = ROUNDS.map(function (r, i) { var s = score(STATES[i], r); return (i + 1) + ": " + (s === null ? "–" : golf(s)) + " (Par " + r.par + ")"; });
+    var total = "Total: " + (dt.done ? golf(dt.score) : "–") + " (Par " + (dt.all || !dt.done ? dt.allPar : dt.par) + ")  ▶";
+    font(dsz, FF.vcr);
+    var lines = [cells.join(gap) + gap + total];
+    if (X.measureText(lines[0]).width > W - mx * 2) lines = [cells.join(gap), total];
+    var ly = ty + (narrow ? 34 : 46), lw = 0;
+    lines.forEach(function (l, k) {
+      var w = T(l, W / 2, ly + k * (dsz + 8), { size: dsz, color: COL.osd, align: "center", glow: 0 }); lw = Math.max(lw, w);
+      X.save(); X.setLineDash([2, 3]); X.strokeStyle = "rgba(214,211,203,.4)"; X.lineWidth = 1.2; X.beginPath(); X.moveTo(W / 2 - w / 2, ly + k * (dsz + 8) + 5); X.lineTo(W / 2 + w / 2, ly + k * (dsz + 8) + 5); X.stroke(); X.restore();
+    });
+    hit("today", W / 2 - lw / 2 - 8, ly - dsz - 4, lw + 16, dsz + 16 + (lines.length - 1) * (dsz + 8), "button", { label: "Today's score and leaderboard", onClick: openScores });
+    var line = fst.done ? (fst.solved ? "IN " + fst.strokes + " · PAR " + r.par + " · " + golf(score(fst, r)) : "EJECTED · " + golf(score(fst, r))) : (t.start + " → " + t.target).toUpperCase() + " · PAR " + r.par;
+    font(cs, FF.vcr); if (X.measureText(line).width > W - mx * 2) line = fst.done ? line : "PAR " + r.par + " · MAKE YOUR OWN TRAIL";
+    T(line, W / 2, cy + cs * 1.2, { size: cs, color: COL.white, align: "center" });
+    var label = fst.done ? "SEE TAPE ▶" : fst.log.length ? "RESUME ▶" : "PLAY ▶";
     var bwid = W_(label, 24, FF.vcr) + 44;
-    button("play", label, W / 2 - bwid / 2, cy + cs * 1.2 + 16, bwid, 44, { primary: !fst.done, onClick: insertTape, label: "Play tape " + (t.ri + 1) });
+    button("play", label, W / 2 - bwid / 2, cy + cs * 1.2 + 16, bwid, 44, { primary: !fst.done, onClick: insertTape, label: "Play tape " + (t.ri + 1) + ": " + t.start + " to " + t.target });
     if (!ui.gl) drawFlatTape();
   }
   function drawLoading() {
@@ -410,77 +624,15 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     X.drawImage(flatCover, W / 2 - w / 2, H * .2, w, h);
     hit("flat", W / 2 - w / 2, H * .2, w, h, "button", { label: "Today's tape", onClick: insertTape });
   }
-  var staticCv = document.createElement("canvas"); staticCv.width = 120; staticCv.height = 90;
-  function drawNoSignal() {
-    var W = ui.W, H = ui.H, sx = staticCv.getContext("2d"), img = sx.createImageData(120, 90);
-    for (var i = 0; i < img.data.length; i += 4) { var v = Math.random() * 255; img.data[i] = img.data[i + 1] = img.data[i + 2] = v; img.data[i + 3] = 255; }
-    sx.putImageData(img, 0, 0);
-    X.save(); X.globalAlpha = .45; X.imageSmoothingEnabled = false; X.drawImage(staticCv, 0, 0, W, H); X.restore();
-    X.fillStyle = "rgba(8,8,9,.55)"; X.fillRect(W * .2, H * .3, W * .6, H * .42);
-    var cy = H * .4;
-    [" (\\(\\", " ( -.-)", ' o_(")(")'].forEach(function (l, i) { T(l, W / 2 - 40, cy + i * 18, { size: 16, fam: FF.mono, color: COL.osd }); });
-    T("NO SIGNAL", W / 2, cy + 96, { size: 64, align: "center", color: COL.white, glow: 10 });
-    font(20, FF.vcr); wrap("CH 02 · DOWN THE HOLE · GUESS EACH NEXT PAGE OF A RABBIT HOLE · COMING AFTER THE WORD", Math.min(W * .5, 380), 0).forEach(function (l, i) { T(l, W / 2, cy + 132 + i * 22, { size: 20, align: "center", color: COL.dim }); });
-    var bwid = W_("BACK TO CH 01", 24, FF.vcr) + 40;
-    button("back1", "BACK TO CH 01", W / 2 - bwid / 2, cy + 196, bwid, 44, { onClick: channelOne });
-  }
 
-  /* --- the round, drawn as a scrolling column --- */
-  function blankParts(size) {
-    // returns [{w, draw(x,y)}] pieces for the headline's blank
-    var it = X.font;
-    if (ST.done) {
-      font(size, FF.serif, "italic"); var w = X.measureText(R.answerDisplay).width;
-      X.font = it; return { w: w, draw: function (x, y) { font(size, FF.serif, "italic"); X.fillStyle = COL.ink; X.fillText(R.answerDisplay, x, y); X.fillRect(x, y + size * .12, w, Math.max(2, size * .05)); } };
-    }
-    var anyLit = Object.keys(ST.lit).length > 0;
-    if (!ST.letters && !anyLit) return { w: size * 2.6, draw: function (x, y) { X.fillStyle = COL.ink; X.fillRect(x + size * .1, y + size * .06, size * 2.4, Math.max(2, size * .055)); } };
-    var gap = size * .25, pieces = answerWords.map(function (wd, i) {
-      if (ST.lit[i]) { font(size, FF.serif, "italic"); return { w: X.measureText(wd).width, lit: wd }; }
-      if (!ST.letters) return { w: size * 1.6, bar: true };
-      return { w: wd.length * size * .5 + (wd.length - 1) * size * .1, letters: wd };
-    });
-    var tot = pieces.reduce(function (a, p) { return a + p.w; }, 0) + gap * (pieces.length - 1);
-    X.font = it;
-    return { w: tot, draw: function (x, y) {
-      pieces.forEach(function (p) {
-        X.fillStyle = COL.ink;
-        if (p.lit) { font(size, FF.serif, "italic"); X.fillText(p.lit, x, y); X.fillRect(x, y + size * .1, p.w, Math.max(2, size * .045)); }
-        else if (p.bar) X.fillRect(x, y + size * .06, p.w, Math.max(2, size * .055));
-        else for (var k = 0; k < p.letters.length; k++) {
-          var lx = x + k * size * .6; X.fillRect(lx, y + size * .06, size * .5, Math.max(2, size * .05));
-          if (ST.first && k === 0) { font(size, FF.serif, "italic"); X.textAlign = "center"; X.fillText(p.letters[0], lx + size * .25, y); X.textAlign = "left"; }
-        }
-        x += p.w + gap;
-      });
-    } };
-  }
-  function drawHeadline(x, y, maxW, size) {
-    font(size, FF.serif);
-    var words = R.headline.split(/\s+/), lines = [], cur = [], curW = 0, sp = X.measureText(" ").width;
-    var blank = blankParts(size);
-    function ww(w) { if (/_{3,}/.test(w)) { var rest = w.replace(/_{3,}/, ""); font(size, FF.serif); return blank.w + (rest ? X.measureText(rest).width : 0); } font(size, FF.serif); return X.measureText(w).width; }
-    words.forEach(function (w) { var wdt = ww(w); if (cur.length && curW + sp + wdt > maxW) { lines.push(cur); cur = [w]; curW = wdt; } else { cur.push(w); curW += (cur.length > 1 ? sp : 0) + wdt; } });
-    if (cur.length) lines.push(cur);
-    var lh = size * 1.0;
-    lines.forEach(function (ln, i) {
-      var cx = x, by = y + size * .86 + i * lh;
-      ln.forEach(function (w) {
-        if (/_{3,}/.test(w)) { var parts = w.split(/_{3,}/); font(size, FF.serif); X.fillStyle = COL.white; if (parts[0]) { X.fillText(parts[0], cx, by); cx += X.measureText(parts[0]).width; } blank.draw(cx, by); cx += blank.w; font(size, FF.serif); X.fillStyle = COL.white; if (parts[1]) { X.fillText(parts[1], cx, by); cx += X.measureText(parts[1]).width; } }
-        else { font(size, FF.serif); X.fillStyle = COL.white; X.shadowColor = "rgba(240,236,226,.35)"; X.shadowBlur = 10 * ui.pr; X.fillText(w, cx, by); X.shadowBlur = 0; cx += X.measureText(w).width; }
-        cx += sp;
-      });
-    });
-    return lines.length * lh + size * .12;
-  }
-  function tierName(r) { return r.kind === "found" ? "FOUND" : r.kind === "e" ? "ECHO · A REAL SENTENCE TIES THEM" : r.kind === "c" ? "CLOSE" : r.kind === "t" ? "ON THE TRAIL · PAGE OPENED" : "COLD"; }
+  /* --- a tape in play, drawn as columns: your route on the left, typing on the right (stacked on phones) --- */
   function drawPlay() {
     var W = ui.W, H = ui.H, narrow = W < 760, mx = W * (narrow ? .09 : .085), my = H * (narrow ? .065 : .08) + ui.safeT;
     var hy = my + 18, hs = narrow ? 21 : 24;
     var bw = T("◀ TAPES", mx, hy, { size: hs }); hit("back", mx - 6, hy - hs, bw + 12, hs + 10, "button", { label: "Back to the tapes", onClick: backToShelf });
-    if (!narrow) T("TAPE " + (RI + 1) + " OF " + ROUNDS.length, W / 2, hy, { size: hs, color: COL.white, align: "center" });
-    var ct = ST.done ? (ST.solved ? "SOLVED" : "REWIND") : "TRY " + Math.min(ST.counted + 1, MAX) + "/" + MAX;
-    var cw = W_(ct, hs, FF.vcr); T(ct, W - mx - cw, hy, { size: hs });
+    if (!narrow) T("TAPE " + (RI + 1) + " OF " + ROUNDS.length + " · " + (TAPES[RI].level || ""), W / 2, hy, { size: hs, color: COL.white, align: "center" });
+    var ct = ST.done ? (ST.solved ? "IN " + ST.strokes + " · " + golfName(score(ST, R)) : "EJECTED") : "STROKES " + ST.strokes + " · PAR " + R.par;
+    var cw = W_(ct, hs, FF.vcr); T(ct, W - mx - cw, hy, { size: hs, terms: true, fixed: true });
     var bottom = H - my * .6 - ui.safeB;
     if (narrow) {
       var top = hy + 20, x = mx, w = W - mx * 2;
@@ -489,11 +641,9 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       y = drawHead(x, y, w, true) + 14;
       y = drawGuessCol(x, y, w, true) + 8;
       X.fillStyle = COL.line; X.fillRect(x, y, w, 1.5); y += 22;
-      y = drawSection(ST.done ? "THE WHOLE RABBIT HOLE" : "THE RABBIT HOLE SO FAR", x, y, w);
-      y = drawTrailSimple(x, y, w) + 30;
+      y = drawRouteCol(x, y, w, true) + 30;
       X.restore();
       ui.maxScroll = Math.max(0, y + ui.scroll - bottom + 10);
-      if (ui.revealJump) { ui.revealJump = false; }
       if (ui.scroll > ui.maxScroll) { ui.scroll = ui.maxScroll; ui.dirty = true; }
       ui.cols = null; ui.clip = [top, bottom];
       return;
@@ -503,161 +653,416 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     X.fillStyle = COL.line; X.fillRect(x0, splitTop, colW, 1.5);
     var gutter = 56, leftW = Math.round(colW / 2 - gutter / 2), rightX = x0 + leftW + gutter, rightW = colW - leftW - gutter, divX = x0 + leftW + gutter / 2;
     X.fillStyle = COL.line; X.fillRect(divX, splitTop + 14, 1.5, Math.max(0, bottom - splitTop - 24));
-    var bottomL = canReveal() ? bottom - 64 : bottom;
-    X.save(); X.beginPath(); X.rect(x0 - 12, splitTop + 2, leftW + 24, bottomL - splitTop - 2); X.clip();
-    var yl = splitTop + 22 - ui.scrollL;
-    yl = drawSection(ST.done ? "THE WHOLE RABBIT HOLE" : "THE RABBIT HOLE SO FAR", x0, yl, leftW);
-    yl = drawTrailSimple(x0, yl, leftW) + 24;
+    X.save(); X.beginPath(); X.rect(x0 - 12, splitTop + 2, leftW + 24, bottom - splitTop - 2); X.clip();
+    var yl = drawRouteCol(x0, splitTop + 22 - ui.scrollL, leftW, false) + 24;
     X.restore();
     X.save(); X.beginPath(); X.rect(rightX - 12, splitTop + 2, rightW + 24, bottom - splitTop - 2); X.clip();
     var yr = splitTop + 22 - ui.scrollR;
-    yr = drawSection(ST.done ? "YOUR RESULT" : "YOUR GUESS", rightX, yr, rightW);
+    yr = drawSection(ST.done ? "YOUR RESULT" : "TYPE THE NEXT PAGE", rightX, yr, rightW);
     yr = drawGuessCol(rightX, yr, rightW, false) + 24;
     X.restore();
-    if (canReveal()) revealButton(x0, bottom - 54, leftW);
-    ui.maxL = Math.max(0, yl + ui.scrollL - bottomL); ui.maxR = Math.max(0, yr + ui.scrollR - bottom);
-    if (ui.revealJump) { ui.revealJump = false; ui.scrollL = ui.maxL; ui.dirty = true; }
+    ui.maxL = Math.max(0, yl + ui.scrollL - bottom); ui.maxR = Math.max(0, yr + ui.scrollR - bottom);
     if (ui.scrollL > ui.maxL) { ui.scrollL = ui.maxL; ui.dirty = true; }
     if (ui.scrollR > ui.maxR) { ui.scrollR = ui.maxR; ui.dirty = true; }
     ui.cols = { split: divX }; ui.clip = [splitTop, bottom];
   }
   function drawHead(x, y, w, narrow) {
-    var ks = narrow ? 17 : 18, chipW = W_("FROM THE LIBRARY", ks, FF.vcr) + 14;
+    var ks = narrow ? 17 : 18, chip = narrow ? "TAPE " + (RI + 1) + " OF " + ROUNDS.length + " · " + (TAPES[RI].level || "") : "FROM THE LIBRARY", chipW = W_(chip, ks, FF.vcr) + 14;
     X.strokeStyle = COL.rose; X.lineWidth = 1.5; X.strokeRect(x + .75, y + .75, chipW - 1.5, ks + 8);
-    T("FROM THE LIBRARY", x + 7, y + ks + 2, { size: ks, color: COL.rose });
+    T(chip, x + 7, y + ks + 2, { size: ks, color: COL.rose });
+    var hl = "? HOW TO PLAY", hw = W_(hl, ks, FF.vcr);
+    T(hl, x + w - hw, y + ks + 2, { size: ks, color: COL.osd });
+    hit("help", x + w - hw - 8, y - 6, hw + 16, ks + 20, "button", { label: "How to play", onClick: openHelp, fixed: true });
     y += ks + 8 + 12;
-    var hsz = narrow ? Math.max(32, Math.min(44, ui.W * .095)) : Math.max(38, Math.min(58, ui.W * .042));
-    y += drawHeadline(x, y, w, hsz) + 4;
-    if (R.search && R.search.show && !ST.done) y += para("SOMEONE SEARCHED “" + R.search.text + "”", x, y, w, { size: narrow ? 17 : 18, fam: FF.vcr, color: COL.dim, lh: 21 });
+    var hsz = narrow ? Math.max(30, Math.min(42, ui.W * .09)) : Math.max(36, Math.min(54, ui.W * .04));
+    y += para(title(R.start) + "  →  " + title(R.target), x, y - hsz * .18, w, { size: hsz, fam: FF.serif, color: COL.white, lh: hsz * 1.02, glow: 5, terms: true, fixed: true }) + 2;
+    var dts = dayTotals();
+    var sub = "PAR " + R.par + " · " + (ST.done ? "THE TAPE PLAYED OUT" : "THE RABBIT TOOK " + R.par + ". MAKE YOUR OWN TRAIL.") + (dts.done && !ST.done ? " · TODAY " + golf(dts.score) + " SO FAR" : "");
+    y += para(sub, x, y, w, { size: narrow ? 17 : 18, fam: FF.vcr, color: COL.dim, lh: 21, terms: true, fixed: true });
     return y;
   }
   function drawSection(label, x, y, w) {
     T(label, x, y + 18, { size: 19, color: COL.rose });
     return y + 36;
   }
-  function tierShort(k) { return k === "found" ? "FOUND" : k === "e" ? "ECHO" : k === "c" ? "CLOSE" : k === "t" ? "ON THE TRAIL" : k === "r" ? "CLUE" : "COLD"; }
-  function revealLine(r) { return r.answerHint ? "You opened the answer page's summary on the left." : "You opened " + (cards[r.card] ? cards[r.card].title : "the next page") + " on the left."; }
+  function kindName(r) {
+    return r.kind === "move" ? (r.to === R.target ? "REACHED · +1" : "MOVE · +1") : r.kind === "broad" ? "TOO BROAD · FREE" : r.kind === "dym" ? (r.none ? "NOT FOUND · FREE" : "WHICH ONE? · FREE") : r.kind === "track" ? "TRACKING · +1" : r.kind === "rewind" ? "REWOUND · FREE" : "STATIC · +1";
+  }
+  function kindShort(k) { return k === "move" ? "MOVE" : k === "broad" ? "TOO BROAD" : k === "dym" ? "WHICH?" : k === "track" ? "TRACKING" : k === "rewind" ? "REWIND" : "STATIC"; }
+  // how a step connects, in words: "Squirrel's page links Nut"
+  function howLine(r) {
+    return r.how === "link" ? r.at + "'s page links " + r.to + "." : r.how === "back" ? r.to + "'s page links " + r.at + "." : r.how === "names" ? r.at + "'s page names " + (r.n || r.to) + "." : r.how === "named" ? r.to + "'s page names " + (r.n || r.at) + "." : r.how === "ai" ? "By association: " + (r.n || r.at + " and " + r.to + " are related.") : "";
+  }
+  function replyLine(r) {
+    var at = title(r.at), tg = title(R.target);
+    if (r.kind === "move") {
+      var s = (r.read ? "Read as " + r.to + ". " : "") + howLine(r);
+      if (r.to === R.target) return s + " You're there.";
+      if (R.lamp[r.to] === true) s += " The END lamp is on: " + r.to + " connects to " + tg + ".";
+      if (onHole(r.to)) s += " The RABBIT lamp is on: " + r.to + " is a page of the real rabbit hole.";
+      return s;
+    }
+    if (r.kind === "broad") return "“" + r.g + "” is too broad: years, dates and lists connect to everything, so they don't count. No stroke.";
+    if (r.kind === "dym") return r.none ? "Couldn't find a Wikipedia page for “" + r.g + "”." + (r.opts.length ? " Did you mean " + r.opts.join(", ") + "?" : " Try another name for it.") + " No stroke." : "Which one? “" + r.g + "” could be " + r.opts.join(", ") + ", and none of them connects to " + at + ". Try one by its full name. No stroke.";
+    if (r.kind === "track") return r.via ? at + "'s page links " + r.via + ", and " + r.via + " is one step from " + tg + "." : r.far ? "Nothing " + at + " links is one step from " + tg + ". But " + r.far + " is. Find your way there." : "No track from here. REWIND is free.";
+    if (r.kind === "rewind") return "Back on " + at + ". No stroke.";
+    return "Wikipedia doesn't tie " + at + " to " + (r.to || "“" + r.g + "”") + ", and the referee doesn't see a clear connection either. One stroke.";
+  }
+  function lamp(x, y, on, label) {
+    X.beginPath(); X.arc(x + 7, y, 7, 0, Math.PI * 2);
+    if (on) { X.fillStyle = COL.ink; X.shadowColor = "rgba(230,220,174,.9)"; X.shadowBlur = 12 * ui.pr; X.fill(); X.shadowBlur = 0; }
+    else { X.strokeStyle = COL.faint; X.lineWidth = 1.5; X.stroke(); }
+    var w = T(label, x + 20, y + 6, { size: 18, color: on ? COL.ink : COL.faint, glow: on ? 6 : 0 });
+    var g = GLOSSARY.filter(function (e) { return e.k === label + " lamp"; })[0];
+    if (g) { X.save(); X.setLineDash([2, 3]); X.strokeStyle = "rgba(230,220,174,.6)"; X.lineWidth = 1.2; X.beginPath(); X.moveTo(x + 20, y + 10); X.lineTo(x + 20 + w, y + 10); X.stroke(); X.restore(); termHit(g, x - 2, y - 10, w + 24, 22); }
+    return 18 + w + 22;
+  }
+  function pips(x, y, w) {
+    var n = R.par + EJECT, s = 14, gap = 5, tw = n * s + (n - 1) * gap, sx = x + w - tw;
+    for (var i = 0; i < n; i++) {
+      var px = sx + i * (s + gap), used = i < ST.strokes;
+      if (used) { X.fillStyle = i < R.par ? COL.osd : COL.flip; X.fillRect(px, y, s, s); }
+      else { X.strokeStyle = i < R.par ? COL.dim : "rgba(214,90,74,.55)"; X.lineWidth = 1.2; X.strokeRect(px + .6, y + .6, s - 1.2, s - 1.2); }
+    }
+    T("PAR", sx + R.par * (s + gap) - gap / 2 - W_("PAR", 14, FF.vcr) / 2, y + s + 16, { size: 14, color: COL.faint, glow: 0, terms: true });
+  }
   function drawGuessCol(x, y, w, narrow) {
-    if (ST.done) {
-      y = drawEnd(x, y - 6, w, narrow) + 18;
-    } else {
-      var ms = 19;
-      T((MAX - ST.counted) + " TRIES LEFT", x, y + ms, { size: ms, color: COL.dim });
-      var counted = ST.log.filter(function (r) { return r.kind !== "t"; }), s = 18, sx = x + w - (MAX * s + (MAX - 1) * 6);
-      for (var i = 0; i < MAX; i++) { if (counted[i]) sq(counted[i].kind, sx + i * (s + 6), y + 2, s); else { X.strokeStyle = COL.faint; X.lineWidth = 1.2; X.strokeRect(sx + i * (s + 6) + .6, y + 2.6, s - 1.2, s - 1.2); } }
-      y += 30;
-      var bW = W_("ENTER", 24, FF.vcr) + 36, fW = w - bW - 8, fh = 52;
-      X.fillStyle = "rgba(0,0,0,.5)"; X.fillRect(x, y, fW, fh);
-      X.strokeStyle = ui.inputFocus ? COL.ink : COL.line; X.lineWidth = ui.inputFocus ? 2 : 1.5; X.strokeRect(x + .75, y + .75, fW - 1.5, fh - 1.5);
-      T("▶", x + 14, y + 33, { size: 18, color: COL.ink, glow: 0 });
-      var val = ui.input;
-      if (val) { font(20, FF.mono); var vt = val, maxT = fW - 60; while (X.measureText(vt).width > maxT && vt.length > 1) vt = vt.slice(1); T(vt, x + 38, y + 33, { size: 20, fam: FF.mono, color: "#fff" }); if (ui.inputFocus) { X.fillStyle = COL.ink; X.fillRect(x + 38 + W_(vt, 20, FF.mono) + 2, y + 16, 10, 22); } }
-      else { T("TYPE A GUESS", x + 38, y + 34, { size: 22, color: COL.faint, glow: 0 }); if (ui.inputFocus) { X.fillStyle = COL.ink; X.fillRect(x + 38, y + 16, 10, 22); } }
-      hit("guess", x, y, fW, fh, "input", { label: "Your guess" });
-      button("enter", "ENTER", x + w - bW, y, bW, fh, { primary: true, onClick: submitGuess, label: "Enter guess" });
-      y += fh + 10;
-      if (narrow && canReveal()) { revealButton(x, y, w); y += 54; }
-      if (ui.free) y += para(ui.free, x, y, w, { size: 15, fam: FF.mono, color: COL.osd }) + 4;
-      if (!ST.log.length) y += para("Type the missing word. Yellow means Wikipedia ties your guess to the answer, and you get that sentence. Orange is close. White is no tie. Stuck? Reveal the next page of the rabbit hole" + (narrow ? " below" : " on the left") + ". A reveal uses one of your six tries.", x, y, w, { size: 15, fam: FF.mono, pre: "500", color: COL.dim, lh: 23 }) + 6;
-      var r = ST.log[ST.log.length - 1];
-      if (r) {
-        var py0 = y; y += 16;
-        sq(r.kind, x + 16, y + 2, 22);
-        var tn = tierShort(r.kind), tnw = W_(tn, 19, FF.vcr);
-        T(tn, x + w - 16 - tnw, y + 20, { size: 19, color: COL.rose });
-        var gh = para(String(r.g).toUpperCase(), x + 48, y - 5, w - 48 - 16 - tnw - 14, { size: 26, fam: FF.vcr, color: "#fff", lh: 28 });
-        y += Math.max(36, gh + 8);
-        var line = r.kind === "cold" ? "No tie found." : r.kind === "t" ? "That's a page of this rabbit hole. It's open now." : r.kind === "r" ? revealLine(r) : r.line || r.note || "";
-        if (r.s) y += para(r.s, x + 16, y, w - 32, { size: 16, fam: FF.mono, pre: "500", color: COL.osd, lh: 25 }) + 2;
-        else if (line) y += para(line, x + 16, y, w - 32, { size: 16, fam: FF.mono, pre: "500", color: COL.osd, lh: 25 });
-        var nx = r.kind !== "t" && r.kind !== "found" ? (ST.counted === 4 ? "THE LETTERS ARE SHOWING NOW." : ST.counted === 5 ? "FIRST LETTER SHOWING. LAST TRY." : nextReveal(ST) !== -1 ? (narrow ? "STUCK? REVEAL THE NEXT PAGE ABOVE." : "STUCK? REVEAL THE NEXT PAGE ON THE LEFT.") : "") : "";
-        if (nx) y += para(nx, x + 16, y + 4, w - 32, { size: 17, fam: FF.vcr, color: COL.faint, lh: 19 });
-        y += 14;
-        X.strokeStyle = COL.line; X.lineWidth = 1.5; X.strokeRect(x + .75, py0 + .75, w - 1.5, y - py0 - 1.5);
-        y += 18;
-      }
+    if (ST.done) return drawEnd(x, y - 6, w, narrow) + 18;
+    var cur = here(ST);
+    var lx = x; lx += lamp(lx, y + 10, linksTarget(cur), "END"); lamp(lx, y + 10, onHole(cur), "RABBIT");
+    pips(x, y + 2, w);
+    y += 44;
+    T("YOU'RE ON", x, y + 14, { size: 17, color: COL.faint, glow: 0 }); y += 18;
+    y += para(title(cur), x, y - 4, w, { size: narrow ? 28 : 32, fam: FF.serif, color: COL.white, lh: narrow ? 30 : 34, glow: 4, terms: true }) + 8;
+    var bW = W_("ENTER", 24, FF.vcr) + 36, fW = w - bW - 8, fh = 52;
+    X.fillStyle = "rgba(0,0,0,.5)"; X.fillRect(x, y, fW, fh);
+    X.strokeStyle = ui.inputFocus ? COL.ink : COL.line; X.lineWidth = ui.inputFocus ? 2 : 1.5; X.strokeRect(x + .75, y + .75, fW - 1.5, fh - 1.5);
+    T("▶", x + 14, y + 33, { size: 18, color: COL.ink, glow: 0 });
+    var val = ui.input;
+    if (val) { font(20, FF.mono); var vt = val, maxT = fW - 60; while (X.measureText(vt).width > maxT && vt.length > 1) vt = vt.slice(1); T(vt, x + 38, y + 33, { size: 20, fam: FF.mono, color: "#fff" }); if (ui.inputFocus) { X.fillStyle = COL.ink; X.fillRect(x + 38 + W_(vt, 20, FF.mono) + 2, y + 16, 10, 22); } }
+    else { var ph = "ANYTHING CONNECTED TO " + title(cur).toUpperCase(); if (narrow || W_(ph, 22, FF.vcr) > fW - 66) ph = "TYPE ANYTHING"; T(ph, x + (ui.inputFocus ? 54 : 38), y + 34, { size: 22, color: COL.faint, glow: 0 }); if (ui.inputFocus) { X.fillStyle = COL.ink; X.fillRect(x + 38, y + 16, 10, 22); } }
+    hit("guess", x, y, fW, fh, "input", { label: "Type something connected to " + title(cur) });
+    button("enter", "ENTER", x + w - bW, y, bW, fh, { primary: true, onClick: submitGuess, label: "Enter" });
+    y += fh + 10;
+    var half = (w - 10) / 2, tracked = !!ST.tracked[cur];
+    button("track", tracked ? (narrow ? "TRACKING · FREE" : "TRACKING AGAIN · FREE") : "TRACKING · +1", x, y, half, 44, { size: 20, onClick: doTrack, label: "Tracking: a page one step from the target. Costs one stroke.", term: "TRACKING" });
+    button("rewind", "◀◀ REWIND · FREE", x + half + 10, y, half, 44, { size: 20, onClick: doRewind, label: "Rewind one page, free", term: "REWIND" });
+    y += 54;
+    if (ui.free) y += para(ui.free, x, y, w, { size: 15, fam: FF.mono, color: COL.osd }) + 4;
+    var r = ST.log[ST.log.length - 1];
+    if (ui.busy) {
+      // checking with Wikipedia: the box tunes in
+      var by0 = y, bh = 86;
+      X.strokeStyle = COL.line; X.lineWidth = 1.5; X.strokeRect(x + .75, by0 + .75, w - 1.5, bh);
+      font(22, FF.vcr); var bt = ui.busy.track ? "TRACKING…" : (ui.busy.ai ? "ASKING THE REFEREE: “" : "TUNING IN “") + String(ui.busy.g).toUpperCase() + "”";
+      while (X.measureText(bt).width > w - 32 && bt.length > 12) bt = bt.slice(0, -3) + "”";
+      T(bt, x + 16, by0 + 34, { size: 22, color: COL.white });
+      var n = Math.floor((w - 32) / 6), ph0 = Math.floor(Date.now() / 90);
+      for (var q = 0; q < n; q++) { var on = ((q * 7 + ph0 * 3) % 11) < 4; X.fillStyle = on ? "rgba(225,222,214,.75)" : "rgba(225,222,214,.15)"; X.fillRect(x + 16 + q * 6, by0 + 52, 2, 18); }
+      y += bh + 18;
+    } else if (r) {
+      var py0 = y; y += 16;
+      sq(r.kind, x + 16, y + 2, 22);
+      var tn = kindName(r), tnw = W_(tn, 19, FF.vcr);
+      T(tn, x + w - 16 - tnw, y + 20, { size: 19, color: COL.rose, terms: true });
+      var head = r.kind === "track" ? "TRACKING" : r.kind === "rewind" ? "◀◀ " + title(r.at).toUpperCase() : String(r.g).toUpperCase();
+      var gh = para(head, x + 48, y - 5, w - 48 - 16 - tnw - 14, { size: 26, fam: FF.vcr, color: "#fff", lh: 28 });
+      y += Math.max(36, gh + 8);
+      y += para(replyLine(r), x + 16, y, w - 32, { size: 16, fam: FF.mono, pre: "500", color: COL.osd, lh: 25, terms: true }) + 2;
+      y += 14;
+      X.strokeStyle = COL.line; X.lineWidth = 1.5; X.strokeRect(x + .75, py0 + .75, w - 1.5, y - py0 - 1.5);
+      y += 18;
     }
-    if (ST.log.length > (ST.done ? 0 : 1)) {
-      var list = ST.log.slice().reverse().slice(ST.done ? 0 : 1);
-      if (list.length) {
-        T(ST.done ? "YOUR GUESSES" : "EARLIER GUESSES", x, y + 16, { size: 17, color: COL.faint, glow: 0 }); y += 26;
-        list.forEach(function (r) {
-          sq(r.kind, x, y + 3, 16);
-          var tw = W_(tierShort(r.kind), 17, FF.vcr); T(tierShort(r.kind), x + w - tw, y + 17, { size: 17, color: COL.faint, glow: 0 });
-          var lh2 = para(String(r.g).toUpperCase(), x + 28, y - 3, w - 28 - tw - 14, { size: 20, fam: FF.vcr, color: COL.osd, lh: 22 });
-          y += Math.max(28, lh2 + 6);
-        });
-      }
-    }
+    if (ST.log.length > 1) y = drawLogList(ST.log.slice(0, -1).reverse(), x, y, w, "EARLIER");
     return y;
   }
-  function canReveal() { return !ST.done && nextReveal(ST) !== -1; }
-  function revealButton(x, y, w) {
-    var rl = nextReveal(ST) === "answer" ? "REVEAL THE ANSWER PAGE'S SUMMARY" : "REVEAL NEXT PAGE";
-    var label = rl + "  ·  USES 1 TRY", rw = Math.min(w, W_(label, 20, FF.vcr) + 40);
-    button("reveal", label, x, y, rw, 44, { size: 20, onClick: doReveal, label: (nextReveal(ST) === "answer" ? "Reveal the answer page's summary" : "Reveal the next page") + ", uses one try" });
-  }
-  function drawTrailSimple(x, y, w) {
-    var tx = x + 28, tw = w - 28, nodes = [];
-    if (R.search && R.search.text) nodes.push({ search: true });
-    cards.forEach(function (c, i) { nodes.push({ c: c, i: i }); });
-    nodes.forEach(function (n, k) {
-      var y0 = y, filled = true, ring = false;
-      if (n.search) {
-        T("THE SEARCH", tx, y + 16, { size: 17, color: COL.faint, glow: 0 }); y += 22;
-        y += para("“" + (ST.done ? unblank(R.search.text) : R.search.text) + "”", tx, y - 4, tw, { size: 16, fam: FF.mono, pre: "500", color: COL.osd, lh: 24 });
-      } else {
-        var c = n.c, i = n.i, open = ST.done || ST.opened[i];
-        var hop = ST.done && R.reveal ? R.reveal.find(function (h) { return norm(h.to) === norm(unblank(c.title)); }) : null;
-        if (c.isAnswer) {
-          ring = !ST.done; filled = ST.done;
-          T(ST.done ? "THE ANSWER" : "THE ANSWER'S PAGE", tx, y + 16, { size: 17, color: ST.done ? COL.ink : COL.faint, glow: 0 }); y += 22;
-          y += para(ST.done ? unblank(c.title) : c.title, tx, y - 2, tw, { size: 26, fam: FF.serif, color: COL.white, lh: 28 });
-          if (ST.done && hop) y += para(hop.s, tx, y + 2, tw, { size: 15, fam: FF.mono, pre: "500", color: COL.dim, lh: 23, maxLines: 4 }) + 4;
-          else if (!ST.done && ST.answerHint && c.summary) y += para(c.summary, tx, y + 2, tw, { size: 15, fam: FF.mono, pre: "500", color: COL.dim, lh: 23, maxLines: 4 }) + 4;
-        } else if (!open) {
-          filled = false;
-          T(nextReveal(ST) === i ? "NEXT TO REVEAL" : "HIDDEN PAGE", tx, y + 16, { size: 17, color: COL.faint, glow: 0 }); y += 24;
-          var bx = tx; [74, 44, 96].slice(0, 2 + (i % 2)).forEach(function (bwid) { for (var q = 0; q < bwid; q += 4) { X.fillStyle = "rgba(214,211,203," + (q % 8 ? .07 : .15) + ")"; X.fillRect(bx + q, y, 2, 14); } bx += bwid + 8; });
-          y += 20;
-        } else {
-          y += para(ST.done ? unblank(c.title) : c.title, tx, y - 4, tw, { size: 26, fam: FF.serif, color: COL.white, lh: 28 });
-          var line = ST.done ? (hop ? hop.s : "") : (c.door && c.door.s ? c.door.s : "");
-          if (line) y += para(line, tx, y + 2, tw, { size: 15, fam: FF.mono, pre: "500", color: COL.dim, lh: 23, maxLines: ST.done ? 4 : 3 }) + 2;
-          if (c.note) y += para(ST.done ? unblank(c.note) : c.note, tx, y + 2, tw, { size: 21, fam: FF.hand, color: COL.ink, lh: 24, maxLines: 2 }) + 2;
-        }
-      }
-      X.beginPath(); X.arc(x + 7, y0 + 10, 6, 0, Math.PI * 2);
-      if (filled && !ring) { X.fillStyle = COL.osd; X.fill(); }
-      else if (ring) { X.fillStyle = "rgba(230,220,174,.25)"; X.fill(); X.strokeStyle = COL.ink; X.lineWidth = 1.5; X.stroke(); }
-      else { X.strokeStyle = COL.dim; X.lineWidth = 1.5; X.stroke(); }
-      y += 18;
-      if (k < nodes.length - 1) { X.setLineDash([3, 4]); X.strokeStyle = COL.faint; X.lineWidth = 1.2; X.beginPath(); X.moveTo(x + 7, y0 + 18); X.lineTo(x + 7, y + 2); X.stroke(); X.setLineDash([]); }
+  function drawLogList(list, x, y, w, label) {
+    T(label, x, y + 16, { size: 17, color: COL.faint, glow: 0 }); y += 26;
+    list.forEach(function (r) {
+      sq(r.kind, x, y + 3, 16);
+      var tw = W_(kindShort(r.kind), 17, FF.vcr); T(kindShort(r.kind), x + w - tw, y + 17, { size: 17, color: COL.faint, glow: 0 });
+      var txt = r.kind === "track" ? "TRACKING ON " + title(r.at).toUpperCase() : r.kind === "rewind" ? "BACK TO " + title(r.at).toUpperCase() : String(r.g).toUpperCase() + (r.kind === "move" && norm(r.g) !== norm(title(r.to)) ? " → " + title(r.to).toUpperCase() : "");
+      var lh2 = para(txt, x + 28, y - 3, w - 28 - tw - 14, { size: 20, fam: FF.vcr, color: COL.osd, lh: 22, terms: true });
+      y += Math.max(28, lh2 + 6);
     });
     return y;
   }
+  // a column of pages joined by a line: filled dots for pages reached, a ring for the target
+  function drawChain(nodes, x, y, w, o) {
+    o = o || {};
+    var tx = x + 28, tw = w - 28;
+    nodes.forEach(function (n, k) {
+      var y0 = y;
+      if (n.label) { T(n.label, tx, y + 16, { size: 16, color: n.labelColor || COL.faint, glow: 0 }); y += 21; }
+      y += para(n.title, tx, y - 4, tw, { size: o.size || 26, fam: FF.serif, color: n.dim ? COL.dim : COL.white, lh: (o.size || 26) + 2, terms: true });
+      if (n.note) y += para(n.note, tx, y + 2, tw, { size: 15, fam: FF.mono, pre: "500", color: COL.dim, lh: 22, maxLines: o.noteLines || 3, terms: true }) + 2;
+      if (n.hand) y += para(n.hand, tx, y + 2, tw, { size: 20, fam: FF.hand, color: COL.ink, lh: 23, maxLines: 2 }) + 2;
+      X.beginPath(); X.arc(x + 7, y0 + (n.label ? 31 : 10), 6, 0, Math.PI * 2);
+      if (n.ring) { X.fillStyle = "rgba(230,220,174,.25)"; X.fill(); X.strokeStyle = COL.ink; X.lineWidth = 1.5; X.stroke(); }
+      else if (n.hollow) { X.strokeStyle = COL.dim; X.lineWidth = 1.5; X.stroke(); }
+      else { X.fillStyle = n.here ? COL.ink : COL.osd; X.fill(); if (n.here) { X.strokeStyle = COL.ink; X.lineWidth = 1.5; X.beginPath(); X.arc(x + 7, y0 + (n.label ? 31 : 10), 10, 0, Math.PI * 2); X.stroke(); } }
+      y += 18;
+      if (k < nodes.length - 1) {
+        var nx = nodes[k + 1];
+        X.setLineDash(nx.gap ? [2, 6] : nx.far ? [1, 8] : [3, 4]); X.strokeStyle = nx.gap ? COL.flip : COL.faint; X.lineWidth = 1.2;
+        X.beginPath(); X.moveTo(x + 7, y0 + (n.label ? 39 : 18)); X.lineTo(x + 7, y + 2 + (nodes[k + 1].label ? 21 : 0)); X.stroke(); X.setLineDash([]);
+      }
+    });
+    return y;
+  }
+  function yourNodes() {
+    var nodes = ST.path.map(function (i, k) {
+      var last = k === ST.path.length - 1, tags = [];
+      if (k === 0) tags.push("START");
+      if (i === R.target) tags.push("TARGET · REACHED");
+      else if (last && !ST.done) tags.push("YOU'RE HERE");
+      if (onHole(i) && i !== R.target) tags.push("🐇 ON THE HOLE");
+      var via = null;
+      if (k > 0) for (var q = ST.log.length - 1; q >= 0; q--) { var e = ST.log[q]; if (e.kind === "move" && e.to === i && e.at === ST.path[k - 1]) { via = e; break; } }
+      return { title: title(i), label: tags.join(" · "), here: last && !ST.done, labelColor: last && !ST.done ? COL.ink : COL.faint, note: via ? howLine(via) : "" };
+    });
+    if (!ST.solved) nodes.push({ title: title(R.target), label: ST.done ? "TARGET · NOT REACHED" : "TARGET", ring: true, far: !ST.done });
+    return nodes;
+  }
+  function rabbitNodes(limit) {
+    var h = R.hole, nodes = [];
+    h.route.forEach(function (n, k) {
+      if (k > limit) return;
+      var hop = k > 0 ? h.hops[k - 1] : null, label = k === 0 ? "START" : "", gap = false;
+      if (hop && hop.kind === "jump") { gap = true; label = "A JUMP: NOT CONNECTED"; }
+      else if (hop && hop.kind !== "link") label = hop.kind === "back" ? "LINKED FROM IT" : "BY NAME";
+      nodes.push({ title: n.t, label: label, labelColor: gap ? COL.flip : COL.faint, note: hop && hop.s ? hop.s : "", hand: n.headline ? "the headline's last word, not a page of the hole" : n.note || "", gap: gap, dim: false });
+    });
+    return nodes;
+  }
+  function drawRouteCol(x, y, w, narrow) {
+    if (!ST.done) {
+      y = drawSection("YOUR ROUTE SO FAR", x, y, w);
+      return drawChain(yourNodes(), x, y, w);
+    }
+    var shown = reduce ? 99 : Math.floor((Date.now() - (ui.playAt || 0)) / 700);
+    var yours = yourNodes();
+    if (narrow) {
+      y = drawSection("YOUR ROUTE · " + moves(ST) + " MOVES", x, y, w);
+      y = drawChain(yours, x, y, w, { size: 22 }) + 16;
+      y = drawSection("▶ THE RABBIT'S ROUTE · @" + R.hole.author.toUpperCase(), x, y, w);
+      y = drawChain(rabbitNodes(shown), x, y, w, { size: 22, noteLines: 3 });
+      y = drawRabbitEnd(x, y, w, shown);
+      return ST.log.length ? drawLogList(ST.log.slice().reverse(), x, y + 18, w, "YOUR TAPE") : y;
+    }
+    var half = (w - 24) / 2, ya = drawSection("YOUR ROUTE", x, y, half), yb = drawSection("▶ THE RABBIT'S ROUTE", x + half + 24, y, half);
+    ya = drawChain(yours, x, ya, half, { size: 22 });
+    yb = drawChain(rabbitNodes(shown), x + half + 24, yb, half, { size: 22, noteLines: 3 });
+    return drawRabbitEnd(x, Math.max(ya, yb) + 8, w, shown);
+  }
+  function drawRabbitEnd(x, y, w, shown) {
+    if (shown < R.hole.route.length) return y;
+    return y + 10;
+  }
   function drawEnd(x, y, w, narrow) {
     var y0 = y; y += 22;
-    T(ST.solved ? "SOLVED · +" + points(ST) + " POINTS" : "THE BLANK GOT YOU · 0 POINTS", x + 18, y + 30, { size: 40, color: "#fff", glow: 4 }); y += 44;
-    ST.log.forEach(function (r, i) { sq(r.kind, x + 18 + i * 24, y, 18); }); y += 32;
-    if (R.cliffhanger) { y += para("“" + R.cliffhanger + "”", x + 18, y, w - 36, { size: 26, fam: FF.serif, pre: "italic 500", color: COL.white, lh: 30 }); y += para("FROM THE RABBIT HOLE · FROM THE LIBRARY", x + 18, y + 4, w - 36, { size: 17, fam: FF.vcr, color: COL.rose, lh: 19 }) + 12; }
-    var left = STATES.some(function (st) { return !st.done; });
-    var follow = R.holeUrl + (R.walkStep ? "?walk=" + encodeURIComponent(R.walkStep) : "");
+    var big = ST.solved ? "IN " + ST.strokes + " · " + golfName(score(ST, R)) : "EJECTED · " + golf(score(ST, R));
+    T(big, x + 18, y + 30, { size: 40, color: "#fff", glow: 4, terms: true }); y += 44;
+    var extra = ST.strokes - moves(ST);
+    var sub = ST.solved ? moves(ST) + (moves(ST) === 1 ? " MOVE" : " MOVES") + (extra ? " + " + extra + (extra === 1 ? " MORE STROKE" : " MORE STROKES") : "") + " · " + (ST.strokes < R.par ? "YOU BEAT THE RABBIT'S " + R.par : ST.strokes === R.par ? "SAME AS THE RABBIT" : "THE RABBIT TOOK " + R.par) : "THE TAPE RAN OUT AT PAR + " + EJECT + ". IT PLAYS THE RABBIT'S ROUTE.";
+    y += para(sub, x + 18, y, w - 36, { size: 18, fam: FF.vcr, color: COL.dim, lh: 21, terms: true }) + 6;
+    y += para("“" + R.hole.title + "”", x + 18, y + 4, w - 36, { size: 24, fam: FF.serif, pre: "italic 500", color: COL.white, lh: 28 });
+    y += para("@" + R.hole.author.toUpperCase() + "'S RABBIT HOLE, WHERE THIS TAPE CAME FROM", x + 18, y + 4, w - 36, { size: 16, fam: FF.vcr, color: COL.rose, lh: 19 }) + 12;
+    ST.log.forEach(function (r, i) { var cols = Math.floor((w - 36) / 24); sq(r.kind, x + 18 + (i % cols) * 24, y + Math.floor(i / cols) * 24, 18); });
+    y += 24 * Math.ceil(ST.log.length / Math.max(1, Math.floor((w - 36) / 24))) + 12;
+    var left = STATES.some(function (st) { return !st.done; }), dt = dayTotals();
+    // the day so far, in one line here; the full card sits under the buttons
+    y += para(left ? "TODAY SO FAR · " + dt.strokes + " STROKES · PAR " + dt.par + " · " + golf(dt.score) + " AFTER " + dt.done + " OF " + ROUNDS.length : "TODAY · " + dt.strokes + " STROKES · PAR " + dt.allPar + " · " + golf(dt.score),
+      x + 18, y + 2, w - 36, { size: left ? 19 : 26, fam: FF.vcr, color: COL.ink, lh: left ? 22 : 28, glow: left ? 0 : 4, terms: true }) + 10;
     if (left) button("next", "NEXT TAPE ▶", x + 18, y, w - 36, 50, { primary: true, onClick: nextTape, label: "Next tape" });
-    else {
-      T("TODAY · " + dayTotal() + "/" + ROUNDS.length * MAX + " · ALL " + ROUNDS.length + " TAPES", x + 18, y + 22, { size: 24, color: COL.ink }); y += 36;
-      button("next", "SHARE TODAY", x + 18, y, w - 36, 50, { primary: true, onClick: share, label: "Copy today's result" });
-    }
+    else button("next", narrow ? "TODAY'S SCORE ▶" : "TODAY'S SCORE & LEADERBOARD ▶", x + 18, y, w - 36, 50, { primary: true, onClick: openScores, label: "Today's score and leaderboard" });
     y += 60;
-    button("follow", narrow ? "FOLLOW THIS RABBIT HOLE ↗" : "FOLLOW THE REST OF THIS RABBIT HOLE ↗", x + 18, y, w - 36, 46, { href: follow, label: "Follow the rest of this rabbit hole on White Rabbit" }); y += 56;
+    button("hole", narrow ? "OPEN THIS RABBIT HOLE ↗" : "OPEN THIS RABBIT HOLE ON WHITERABBT.COM ↗", x + 18, y, w - 36, 46, { href: R.hole.url, label: "Open this rabbit hole on White Rabbit" }); y += 56;
     var half = (w - 36 - 10) / 2;
-    if (left) button("share", "SHARE SO FAR", x + 18, y, half, 44, { onClick: share, label: "Copy today's result so far" });
-    else button("share", "◀ TAPES", x + 18, y, half, 44, { onClick: backToShelf, label: "Back to the tapes" });
-    button("more", "MORE HOLES", x + 18 + half + 10, y, half, 44, { href: "https://whiterabbt.com/daily", label: "More rabbit holes on White Rabbit" }); y += 52;
+    if (left) button("share", narrow ? "SCORES ▶" : "TODAY'S SCORE ▶", x + 18, y, half, 44, { onClick: openScores, label: "Today's score and leaderboard" });
+    else button("share", "SHARE TODAY", x + 18, y, half, 44, { onClick: share, label: "Copy today's result" });
+    button("more", "MORE HOLES ↗", x + 18 + half + 10, y, half, 44, { href: "https://whiterabbt.com/daily", label: "More rabbit holes on White Rabbit" }); y += 52;
     if (ui.copied) { T(ui.copied, x + 18, y + 16, { size: 19, color: COL.found }); y += 26; }
-    y += 10;
+    y = drawYourTable(x + 18, y + 12, w - 36, true) + 10;
     X.strokeStyle = COL.line; X.lineWidth = 1.5; X.strokeRect(x + .75, y0 + .75, w - 1.5, y - y0 - 1.5);
+    if (ST.log.length && !narrow) y = drawLogList(ST.log.slice().reverse(), x, y + 18, w, "YOUR TAPE");
     return y;
+  }
+  /* --- today's score and the leaderboard: tables, on their own screen --- */
+  // a bordered table: cols [{ label, f: share of the width, align, term }], rows [{ cells: [text | { t, sub }], color, hl, strong }]
+  function drawTable(x, y, w, cols, rows, o) {
+    o = o || {};
+    var fs = o.size || 17, hh = 30, xs = [], acc = x;
+    cols.forEach(function (c) { xs.push(acc); acc += c.f * w; });
+    X.fillStyle = "rgba(214,211,203,.09)"; X.fillRect(x, y, w, hh);
+    cols.forEach(function (c, i) {
+      var cx = c.align === "center" ? xs[i] + c.f * w / 2 : c.align === "right" ? xs[i] + c.f * w - 10 : xs[i] + 10;
+      T(c.label, cx, y + 21, { size: 15, color: COL.faint, glow: 0, align: c.align || "left", terms: !!c.term });
+    });
+    var top = y; y += hh;
+    rows.forEach(function (r) {
+      var cells = r.cells.map(function (c) { return c !== null && typeof c === "object" ? c : { t: c }; }); // a plain string has a .sub of its own
+      var rh = cells.some(function (c) { return c.sub; }) ? 48 : 34;
+      if (r.hl) { X.fillStyle = r.hl; X.fillRect(x, y, w, rh); }
+      X.fillStyle = r.strong ? COL.osd : COL.line; X.fillRect(x, y, w, r.strong ? 1.5 : 1);
+      cells.forEach(function (c, i) {
+        var col = cols[i], cw = col.f * w - 20, t = c.t, sub = c.sub;
+        var cx = col.align === "center" ? xs[i] + col.f * w / 2 : col.align === "right" ? xs[i] + col.f * w - 10 : xs[i] + 10;
+        var size = r.strong ? fs + 3 : fs;
+        font(size, FF.vcr); t = String(t); while (X.measureText(t).width > cw && t.length > 2) t = t.slice(0, -2) + "…";
+        T(t, cx, y + (sub ? 21 : 23) + (r.strong ? 1 : 0), { size: size, color: c.color || r.color || COL.osd, glow: 0, align: col.align || "left" });
+        if (sub) { font(14, FF.mono, "500"); var s2 = String(sub); while (X.measureText(s2).width > cw && s2.length > 2) s2 = s2.slice(0, -2) + "…"; X.fillStyle = COL.dim; X.textAlign = col.align === "center" ? "center" : col.align === "right" ? "right" : "left"; X.fillText(s2, cx, y + 40); X.textAlign = "left"; }
+      });
+      y += rh;
+    });
+    X.strokeStyle = COL.line; X.lineWidth = 1.5; X.strokeRect(x + .75, top + .75, w - 1.5, y - top - 1.5);
+    for (var i = 1; i < cols.length; i++) { X.fillStyle = COL.line; X.fillRect(xs[i], top, 1, y - top); }
+    return y;
+  }
+  function scoreColor(n) { return n === null ? COL.faint : n < 0 ? COL.found : n > 0 ? COL.c : COL.white; }
+  // your day as a table: each tape's par, strokes and score, and the total
+  function drawYourTable(x, y, w, compact) {
+    var t = dayTotals();
+    var rows = ROUNDS.map(function (r, i) {
+      var st = STATES[i], s = strokesOf(st, r), sc = score(st, r), live = st && !st.done && st.log.length;
+      return { cells: [compact ? (i + 1) + " " + (TAPES[i].level || "") : { t: (i + 1) + " · " + (TAPES[i].level || ""), sub: r.start + " → " + r.target }, String(r.par),
+        s !== null ? s + (st.ejected ? "*" : "") : live ? st.strokes + "…" : "–", { t: sc === null ? "–" : golf(sc), color: scoreColor(sc) }], color: i === RI && ui.view === "play" ? COL.white : st && st.done ? COL.osd : COL.dim };
+    });
+    rows.push({ strong: true, hl: "rgba(230,220,174,.08)", color: COL.ink, cells: ["TODAY", String(t.all ? t.allPar : t.par), t.done ? String(t.strokes) : "–", { t: golf(t.score), color: t.done ? scoreColor(t.score) : COL.faint }] });
+    y = drawTable(x, y, w, [{ label: "TAPE", f: .46 }, { label: "PAR", f: .15, align: "center", term: true }, { label: "STROKES", f: .21, align: "center", term: true }, { label: "SCORE", f: .18, align: "center" }], rows, { size: compact ? 16 : 17 });
+    var notes = [];
+    if (!t.all) notes.push(t.done + " of " + ROUNDS.length + " tapes finished; TODAY adds up the finished ones.");
+    if (STATES.some(function (st) { return st.ejected; })) notes.push("* ejected: counts as par + " + (EJECT + 1) + ".");
+    if (notes.length) y += para(notes.join(" "), x, y + 4, w, { size: 14, fam: FF.mono, pre: "500", color: COL.faint, lh: 19, terms: true });
+    return y + 6;
+  }
+  // the leaderboard: from /api/board (noclick/board.mjs), by score, then strokes, then who posted first
+  var BOARD = { state: "idle", entries: [], you: null, err: "" };
+  function deviceId() { try { var d = localStorage.getItem("wr-noclick-device"); if (!d) { d = (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2) + Date.now()); localStorage.setItem("wr-noclick-device", d); } return d; } catch (e) { return "no-storage-" + String(Math.random()).slice(2); } }
+  function savedName() { try { return localStorage.getItem("wr-noclick-name") || ""; } catch (e) { return ""; } }
+  function postedName() { try { return localStorage.getItem("wr-noclick:posted:" + DATA.date) || ""; } catch (e) { return ""; } }
+  function fetchBoard() {
+    BOARD.state = "loading"; ui.dirty = true; kick();
+    fetch("/api/board?date=" + encodeURIComponent(DATA.date) + "&device=" + encodeURIComponent(deviceId())).then(function (r) {
+      if (r.status === 503) { BOARD.state = "setup"; return null; }
+      if (!r.ok) throw new Error(r.status); return r.json();
+    }).then(function (j) { if (j && j.setup) BOARD.state = "setup"; else if (j) { BOARD.entries = j.entries || []; BOARD.you = BOARD.entries.filter(function (e) { return e.mine; })[0] || null; BOARD.state = "ok"; } ui.dirty = true; kick(); },
+      function () { BOARD.state = "error"; ui.dirty = true; kick(); });
+  }
+  function postScore() {
+    var name = (ui.nameText !== undefined ? ui.nameText : savedName()).trim();
+    if (name.length < 2) { BOARD.err = "Type a name of 2 to 16 letters first."; ui.dirty = true; kick(); return; }
+    if (!dayTotals().all || BOARD.state === "posting") return;
+    BOARD.err = ""; BOARD.state = "posting"; ui.dirty = true; kick();
+    var body = { date: DATA.date, device: deviceId(), name: name, tapes: ROUNDS.map(function (r, i) { var st = STATES[i]; return { slug: r.slug, par: r.par, strokes: strokesOf(st, r), solved: st.solved }; }) };
+    fetch("/api/board", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then(function (r) {
+      if (r.status === 503) { BOARD.state = "setup"; return null; }
+      return r.json().then(function (j) { if (!r.ok) throw new Error(j.error || r.status); return j; });
+    }).then(function (j) {
+      if (j && j.setup) BOARD.state = "setup";
+      else if (j) {
+        BOARD.entries = j.entries || []; BOARD.you = j.you || null; BOARD.state = "ok";
+        try { localStorage.setItem("wr-noclick-name", name); localStorage.setItem("wr-noclick:posted:" + DATA.date, name); } catch (e) {}
+        ui.nameText = undefined; ui.editName = false;
+        if (hitEls.name) hitEls.name.blur();
+      }
+      ui.dirty = true; kick();
+    }, function (e) { BOARD.state = "ok"; BOARD.err = "Couldn't post: " + (e.message || "no signal") + ". Try again."; ui.dirty = true; kick(); });
+  }
+  function drawBoard(x, y, w, narrow) {
+    var t = dayTotals();
+    if (BOARD.state === "loading" || BOARD.state === "idle") return y + para("TUNING IN THE LEADERBOARD…", x, y, w, { size: 19, fam: FF.vcr, color: COL.dim, lh: 22 });
+    if (BOARD.state === "setup") return y + para("The leaderboard isn't switched on for this site yet.", x, y, w, { size: 16, fam: FF.mono, pre: "500", color: COL.dim, lh: 23 });
+    if (BOARD.state === "error") { y += para("NO SIGNAL: the leaderboard didn't answer.", x, y, w, { size: 17, fam: FF.vcr, color: COL.dim, lh: 21 }) + 8; button("board-retry", "TRY AGAIN", x, y, Math.min(w, 200), 42, { size: 20, onClick: fetchBoard, label: "Load the leaderboard again" }); return y + 52; }
+    var list = BOARD.entries, top = list.slice(0, 20), me = BOARD.you;
+    if (!list.length) y += para("Nobody has posted today yet. " + (t.all ? "Be the first." : "Finish all three tapes and be the first."), x, y, w, { size: 16, fam: FF.mono, pre: "500", color: COL.dim, lh: 23 }) + 10;
+    else {
+      var rows = top.map(function (e) { return { hl: e.mine ? "rgba(230,220,174,.14)" : "", color: e.mine ? COL.ink : COL.osd, cells: [String(e.rank), e.name + (e.mine ? " (YOU)" : ""), String(e.strokes), { t: golf(e.score), color: e.mine ? COL.ink : scoreColor(e.score) }] }; });
+      if (me && me.rank > 20) { rows.push({ color: COL.faint, cells: ["…", "", "", ""] }); rows.push({ hl: "rgba(230,220,174,.14)", color: COL.ink, cells: [String(me.rank), me.name + " (YOU)", String(me.strokes), golf(me.score)] }); }
+      y = drawTable(x, y, w, [{ label: "#", f: .12, align: "center" }, { label: "PLAYER", f: .48 }, { label: "STROKES", f: .2, align: "center", term: true }, { label: "SCORE", f: .2, align: "center" }], rows, { size: 17 }) + 8;
+      y += para(list.length + (list.length === 1 ? " PLAYER" : " PLAYERS") + " TODAY" + (me ? " · YOU'RE #" + me.rank : ""), x, y, w, { size: 16, fam: FF.vcr, color: COL.faint, lh: 19 }) + 10;
+    }
+    // posting: a name, then your finished day goes up (posting again updates it)
+    if (!t.all) return y + para("Finish all three tapes to post your score.", x, y, w, { size: 16, fam: FF.mono, pre: "500", color: COL.dim, lh: 23 });
+    var posted = me && !ui.editName;
+    if (posted) {
+      y += para("POSTED AS " + me.name.toUpperCase(), x, y, w, { size: 18, fam: FF.vcr, color: COL.found, lh: 21 }) + 6;
+      button("board-rename", "CHANGE NAME", x, y, Math.min(w, 220), 40, { size: 19, onClick: function () { ui.editName = true; ui.nameText = me.name; ui.dirty = true; kick(); }, label: "Change the name on the leaderboard" });
+      return y + 50;
+    }
+    T("YOUR NAME", x, y + 15, { size: 16, color: COL.faint, glow: 0 }); y += 22;
+    var val = ui.nameText !== undefined ? ui.nameText : savedName(), bW = Math.min(150, w * .38), fW = w - bW - 8, fh = 48;
+    X.fillStyle = "rgba(0,0,0,.5)"; X.fillRect(x, y, fW, fh);
+    X.strokeStyle = ui.nameFocus ? COL.ink : COL.line; X.lineWidth = ui.nameFocus ? 2 : 1.5; X.strokeRect(x + .75, y + .75, fW - 1.5, fh - 1.5);
+    if (val) T(val, x + 14, y + 31, { size: 20, fam: FF.mono, color: "#fff" }); else T("2–16 LETTERS", x + 14, y + 32, { size: 20, color: COL.faint, glow: 0 });
+    if (ui.nameFocus) { X.fillStyle = COL.ink; X.fillRect(x + 14 + (val ? W_(val, 20, FF.mono) + 2 : 0), y + 14, 9, 20); }
+    hit("name", x, y, fW, fh, "input", { label: "Your name on the leaderboard", maxLength: 16, value: val, focusKey: "nameFocus", onText: function (v) { ui.nameText = v; BOARD.err = ""; }, onSubmit: postScore });
+    button("board-post", BOARD.state === "posting" ? "POSTING…" : "POST ▶", x + w - bW, y, bW, fh, { primary: true, size: 21, onClick: postScore, label: "Post my score to today's leaderboard" });
+    y += fh + 8;
+    if (BOARD.err) y += para(BOARD.err, x, y, w, { size: 15, fam: FF.mono, pre: "500", color: COL.c, lh: 21 }) + 4;
+    return y;
+  }
+  function drawScores() {
+    var W = ui.W, H = ui.H, narrow = W < 760, mx = W * (narrow ? .09 : .085), my = H * (narrow ? .065 : .08) + ui.safeT;
+    var hy = my + 18, hs = narrow ? 21 : 24, t = dayTotals();
+    var bw = T("◀ TAPES", mx, hy, { size: hs }); hit("back", mx - 6, hy - hs, bw + 12, hs + 10, "button", { label: "Back to the tapes", onClick: backToShelf });
+    var day = new Date(DATA.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }).toUpperCase();
+    var ht = (narrow ? "" : NAME.toUpperCase() + " #" + (DATA.day || 1) + " · ") + day;
+    var htw = W_(ht, hs, FF.vcr); T(ht, W - mx - htw, hy, { size: hs, color: COL.white });
+    var bottom = H - my * .6 - ui.safeB;
+    function yours(x, y, w) {
+      y = drawSection("TODAY'S SCORE", x, y, w);
+      var big = t.done ? golf(t.score) : "–";
+      var bigW = T(big, x, y + 56, { size: 70, color: t.done ? scoreColor(t.score) : COL.faint, glow: 6 });
+      var line = t.done ? t.strokes + " STROKES · PAR " + (t.all ? t.allPar : t.par) + (t.all ? " · ALL " + ROUNDS.length + " TAPES" : " · " + t.done + " OF " + ROUNDS.length + " TAPES") : "NO TAPES FINISHED YET";
+      para(line, x + bigW + 18, y + 26, w - bigW - 18, { size: 19, fam: FF.vcr, color: COL.dim, lh: 22, terms: true });
+      y += 80;
+      y = drawYourTable(x, y, w, false) + 12;
+      var half = (w - 10) / 2;
+      button("scores-share", "SHARE TODAY", x, y, half, 46, { primary: t.all, size: 21, onClick: share, label: "Copy today's result" });
+      var nx = firstOpen(), more = STATES.some(function (st) { return !st.done; });
+      button("scores-next", more ? "PLAY TAPE " + (nx + 1) + " ▶" : "◀ TAPES", x + half + 10, y, half, 46, { size: 21, primary: more, onClick: more ? function () { focus = nx; if (GL) GL.focus(nx); openRound(nx); } : backToShelf, label: more ? "Play tape " + (nx + 1) : "Back to the tapes" });
+      y += 54;
+      if (ui.copied) { T(ui.copied, x, y + 16, { size: 19, color: COL.found }); y += 26; }
+      return y;
+    }
+    function board(x, y, w) {
+      y = drawSection("LEADERBOARD · TODAY", x, y, w);
+      return drawBoard(x, y, w, narrow);
+    }
+    if (narrow) {
+      var top = hy + 20, x = mx, w = W - mx * 2;
+      X.save(); X.beginPath(); X.rect(0, top, W, bottom - top); X.clip();
+      var y = top + 12 - ui.scroll;
+      y = yours(x, y, w) + 18;
+      X.fillStyle = COL.line; X.fillRect(x, y, w, 1.5); y += 22;
+      y = board(x, y, w) + 30;
+      X.restore();
+      ui.maxScroll = Math.max(0, y + ui.scroll - bottom + 10);
+      if (ui.scroll > ui.maxScroll) { ui.scroll = ui.maxScroll; ui.dirty = true; }
+      ui.cols = null; ui.clip = [top, bottom];
+      return;
+    }
+    var colW = Math.min(1120, W - mx * 2), x0 = (W - colW) / 2, splitTop = hy + 26;
+    X.fillStyle = COL.line; X.fillRect(x0, splitTop, colW, 1.5);
+    var gutter = 56, leftW = Math.round(colW / 2 - gutter / 2), rightX = x0 + leftW + gutter, rightW = colW - leftW - gutter, divX = x0 + leftW + gutter / 2;
+    X.fillStyle = COL.line; X.fillRect(divX, splitTop + 14, 1.5, Math.max(0, bottom - splitTop - 24));
+    X.save(); X.beginPath(); X.rect(x0 - 12, splitTop + 2, leftW + 24, bottom - splitTop - 2); X.clip();
+    var yl = yours(x0, splitTop + 22 - ui.scrollL, leftW) + 24;
+    X.restore();
+    X.save(); X.beginPath(); X.rect(rightX - 12, splitTop + 2, rightW + 24, bottom - splitTop - 2); X.clip();
+    var yr = board(rightX, splitTop + 22 - ui.scrollR, rightW) + 24;
+    X.restore();
+    ui.maxL = Math.max(0, yl + ui.scrollL - bottom); ui.maxR = Math.max(0, yr + ui.scrollR - bottom);
+    if (ui.scrollL > ui.maxL) { ui.scrollL = ui.maxL; ui.dirty = true; }
+    if (ui.scrollR > ui.maxR) { ui.scrollR = ui.maxR; ui.dirty = true; }
+    ui.cols = { split: divX }; ui.clip = [splitTop, bottom];
+  }
+  function openScores() {
+    ui.view = "scores"; ui.scroll = 0; ui.scrollL = 0; ui.scrollR = 0; ui.copied = ""; ui.tip = null; ui.modal = null; ui.editName = false; ui.nameText = undefined;
+    if (GL) GL.show(false);
+    fetchBoard(); flash(); ui.dirty = true; kick();
+    try { history.replaceState(null, "", "#today"); } catch (e) {}
   }
   function drawUI() {
     var cv = ui.cv;
@@ -665,8 +1070,9 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     X.setTransform(1, 0, 0, 1, 0, 0); X.clearRect(0, 0, cv.width, cv.height);
     X.setTransform(ui.pr, 0, 0, ui.pr, 0, 0);
     if (!ui.gl) { var g = X.createRadialGradient(ui.W / 2, ui.H * .45, 10, ui.W / 2, ui.H * .45, ui.W * .8); g.addColorStop(0, "#2b2b2d"); g.addColorStop(1, "#0c0c0d"); X.fillStyle = g; X.fillRect(0, 0, ui.W, ui.H); }
-    ui.hits = [];
-    if (ui.view === "loading") drawLoading(); else if (ui.view === "shelf") drawShelf(); else drawPlay();
+    ui.hits = []; ui.termN = 0; ui.pageTerms = pageTerms();
+    if (ui.view === "loading") drawLoading(); else if (ui.view === "shelf") drawShelf(); else if (ui.view === "scores") drawScores(); else { drawPlay(); if (ui.modal) drawModal(); }
+    if (ui.view === "play" || ui.view === "scores") drawTip();
   }
 
   /* --- the glass: our own picture laid over the tube, like a real CRT front --- */
@@ -678,7 +1084,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     g.setTransform(pr, 0, 0, pr, 0, 0); g.clearRect(0, 0, W, H);
     var portrait = W / H < 0.8, m = Math.min(W, H);
     var ix = W * (portrait ? .03 : .026), iy = H * (portrait ? .022 : .036), r = m * (portrait ? .1 : .085);
-    var bx = W * (portrait ? .006 : .007), by = H * (portrait ? .004 : .011);
+    var bx = ui.flat ? 0 : W * (portrait ? .006 : .007), by = ui.flat ? 0 : H * (portrait ? .004 : .011);
     function opening(ctx) {
       var l = ix, t = iy, rr = W - ix, b = H - iy;
       ctx.moveTo(l + r, t);
@@ -735,10 +1141,12 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     return [(o0 + 1) / 2 * ui.W, (o1 + 1) / 2 * ui.H];
   }
   var hitEls = {};
+  // definitions open on hover only with a real mouse; on touch screens a tap opens them (a stale finger position mustn't)
+  var canHover = !!(window.matchMedia && window.matchMedia("(hover: hover) and (pointer: fine)").matches);
   function syncHits() {
     var used = {}, layer = $("hits");
     ui.hits.forEach(function (h) {
-      if (ui.clip && ui.view === "play" && h.id !== "back" && (h.y + h.h < ui.clip[0] || h.y > ui.clip[1])) return;
+      if (ui.clip && (ui.view === "play" || ui.view === "scores") && h.id !== "back" && !h.fixed && (h.y + h.h < ui.clip[0] || h.y > ui.clip[1])) return;
       var el = hitEls[h.id];
       var tag = h.kind === "link" ? "a" : h.kind === "input" ? "input" : "button";
       if (!el || el.tagName.toLowerCase() !== tag) {
@@ -748,10 +1156,11 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
         if (tag === "a") { el.target = "_blank"; el.rel = "noopener"; }
         if (tag === "input") {
           el.type = "text"; el.autocomplete = "off"; el.setAttribute("autocapitalize", "none"); el.setAttribute("autocorrect", "off"); el.spellcheck = false; el.setAttribute("enterkeyhint", "go");
-          el.addEventListener("input", function () { ui.input = el.value; ui.free = ""; ui.dirty = true; kick(); });
-          el.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); submitGuess(); } });
-          el.addEventListener("focus", function () { ui.inputFocus = true; ui.dirty = true; kick(); });
-          el.addEventListener("blur", function () { ui.inputFocus = false; ui.dirty = true; kick(); });
+          // each text box says what its typing does (the guess box by default, the leaderboard name box its own)
+          el.addEventListener("input", function () { var hh = el._h || {}; if (hh.onText) hh.onText(el.value); else { ui.input = el.value; ui.free = ""; } ui.dirty = true; kick(); });
+          el.addEventListener("keydown", function (e) { if (e.key === "Enter") { e.preventDefault(); ((el._h && el._h.onSubmit) || submitGuess)(); } });
+          el.addEventListener("focus", function () { ui[(el._h && el._h.focusKey) || "inputFocus"] = true; ui.dirty = true; kick(); });
+          el.addEventListener("blur", function () { ui[(el._h && el._h.focusKey) || "inputFocus"] = false; ui.dirty = true; kick(); });
         } else {
           el.addEventListener("focus", function () { if (el.matches(":focus-visible")) { ui.focusId = h.id; ui.dirty = true; kick(); } });
           el.addEventListener("blur", function () { if (ui.focusId === el.dataset.id) { ui.focusId = null; ui.dirty = true; kick(); } });
@@ -759,7 +1168,10 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
         hitEls[h.id] = el; layer.appendChild(el);
       }
       if (tag === "a") el.href = h.href;
+      if (tag === "input") { el._h = h; if (h.maxLength) el.maxLength = h.maxLength; if (h.value !== undefined && document.activeElement !== el && el.value !== h.value) el.value = h.value; }
       if (tag !== "input") { el.onclick = h.onClick ? function (e) { e.preventDefault(); h.onClick(); } : null; el.textContent = h.label; }
+      el.onmouseenter = canHover ? h.onEnter || null : null; el.onmouseleave = canHover ? h.onLeave || null : null;
+      if (h.term) el.dataset.term = "1"; else delete el.dataset.term;
       el.setAttribute("aria-label", h.label);
       var a = toVisual(h.x, h.y), b = toVisual(h.x + h.w, h.y), c = toVisual(h.x, h.y + h.h), d = toVisual(h.x + h.w, h.y + h.h);
       var L = Math.min(a[0], c[0]), Rr = Math.max(b[0], d[0]), Tt = Math.min(a[1], b[1]), B = Math.max(c[1], d[1]);
@@ -832,7 +1244,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     var casGeo = new THREE.BoxGeometry(1.84, 0.92, 0.28);
     groups = TAPES.map(function (t, i) {
       var tex = new THREE.CanvasTexture(drawCover(t, i)); tex.encoding = THREE.sRGBEncoding; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-      var sideTex = new THREE.CanvasTexture(drawSide(t.ink)); sideTex.encoding = THREE.sRGBEncoding;
+      var sideTex = new THREE.CanvasTexture(drawSide(t)); sideTex.encoding = THREE.sRGBEncoding;
       var front = new THREE.MeshLambertMaterial({ map: tex }), side = new THREE.MeshLambertMaterial({ map: sideTex });
       var g = new THREE.Group(), sleeve = new THREE.Mesh(geo, [side, side, dark, dark, front, dark]); g.add(sleeve);
       var cas = new THREE.Mesh(casGeo, [dark, dark, dark, dark, new THREE.MeshLambertMaterial({ map: casTex }), dark]); cas.position.set(0, 1.25, -0.01); g.add(cas);
@@ -863,7 +1275,8 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       rt.setSize(Math.floor(w * pr), Math.floor(h * pr));
       mat.uniforms.uRes.value.set(Math.floor(w * pr), Math.floor(h * pr));
       mat.uniforms.uBend.value.set(BX, BY);
-      if (w / h < 0.8) { mat.uniforms.uGlass.value.set(0.925, 0.955); mat.uniforms.uBow.value.set(0.035, 0.014); }
+      if (ui.flat) { mat.uniforms.uGlass.value.set(0.94, 0.962); mat.uniforms.uBow.value.set(0, 0); }
+      else if (w / h < 0.8) { mat.uniforms.uGlass.value.set(0.925, 0.955); mat.uniforms.uBow.value.set(0.035, 0.014); }
       else { mat.uniforms.uGlass.value.set(0.93, 0.917); mat.uniforms.uBow.value.set(0.02, 0.028); }
       camera.aspect = w / h;
       var tanh = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
@@ -902,9 +1315,9 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   }
 
   var flatCtx = null;
+  function playing() { return ui.view === "play" && ui.playAt && Date.now() - ui.playAt < (R.hole.route.length + 1) * 700 + 120; }
   function frame(now) {
     raf = 0;
-    if (ui.nosig && Date.now() < ui.nosig) ui.dirty = true;
     if (ui.view === "loading") {
       var tnow = Date.now();
       if (!ui.loadStart) ui.loadStart = tnow;
@@ -912,21 +1325,25 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       if (ui.loadDone && !ui.doneAt) { ui.doneAt = tnow; ui.loadFrom = early; }
       ui.load = ui.doneAt ? Math.min(100, ui.loadFrom + (100 - ui.loadFrom) * Math.min(1, (tnow - ui.doneAt) / (reduce ? 1 : 450))) : early;
       ui.dirty = true;
-      if (ui.load >= 100 && tnow - ui.doneAt > (reduce ? 0 : 520)) { ui.view = "shelf"; if (GL) GL.show(true); flash(); var hm = /^#word-(\d+)$/.exec(location.hash); if (hm && +hm[1] >= 1 && +hm[1] <= ROUNDS.length) { focus = +hm[1] - 1; if (GL) GL.focus(focus); openRound(+hm[1] - 1); } }
+      if (ui.load >= 100 && tnow - ui.doneAt > (reduce ? 0 : 520)) { ui.view = "shelf"; if (GL) GL.show(true); flash(); if (location.hash === "#today") openScores(); var hm = /^#tape-(\d+)$/.exec(location.hash); if (hm && +hm[1] >= 1 && +hm[1] <= ROUNDS.length) { focus = +hm[1] - 1; if (GL) GL.focus(focus); openRound(+hm[1] - 1); } }
     }
+    var anim = playing() || !!ui.busy;
+    if (anim) ui.dirty = true;
     if (ui.dirty) { ui.dirty = false; drawUI(); ui.texDirty = true; syncHits(); }
     var busy = false;
     if (GL) busy = GL.frame(now);
     else if (ui.texDirty) { var f = $("flat"); f.width = ui.cv.width; f.height = ui.cv.height; flatCtx = flatCtx || f.getContext("2d"); flatCtx.drawImage(ui.cv, 0, 0); ui.texDirty = false; }
     if (GL && !reduce) busy = true;
-    if (ui.nosig && Date.now() < ui.nosig) busy = true;
-    if (ui.view === "loading") busy = true;
+    if (anim || ui.view === "loading") busy = true;
     if (busy || ui.dirty) kick();
   }
   function resize() {
     var cv = $("gl") || $("flat"); ui.W = cv.clientWidth; ui.H = cv.clientHeight; ui.pr = Math.min(window.devicePixelRatio || 1, 2);
     try { var cs = getComputedStyle($("probe")); ui.safeT = parseFloat(cs.paddingTop) || 0; ui.safeB = parseFloat(cs.paddingBottom) || 0; } catch (e) {}
-    var portrait = ui.W / Math.max(1, ui.H) < 0.8; BX = portrait ? 4.6 : 3.4; BY = portrait ? 4.0 : 2.9;
+    var portrait = ui.W / Math.max(1, ui.H) < 0.8;
+    // phones get a flat screen: no barrel bend, straight glass edges (the scanlines and the glass stay)
+    ui.flat = portrait || ui.W < 760;
+    BX = ui.flat ? 1e6 : 3.4; BY = ui.flat ? 1e6 : 2.9;
     if (GL) GL.size();
     drawGlass();
     ui.dirty = true; kick();
@@ -940,47 +1357,91 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   }
   function openRound(i) {
     if (typeof i === "number") useRound(i);
-    ui.view = "play"; ui.scroll = 0; ui.scrollL = 0; ui.scrollR = 0; ui.free = ""; ui.copied = ""; ui.nosig = 0; ui.input = "";
+    ui.view = "play"; ui.scroll = 0; ui.scrollL = 0; ui.scrollR = 0; ui.free = ""; ui.copied = ""; ui.input = "";
+    ui.playAt = ST.done ? Date.now() : 0; ui.busy = null; ui.tip = null;
+    ui.modal = !ST.done && !helpSeen() ? "help" : null;
+    resolve(R.start).catch(function () {}); resolve(R.target).catch(function () {});
+    if (!ST.done) lampCheck(here(ST));
     if (hitEls.guess) hitEls.guess.value = "";
     if (GL) GL.show(false);
     flash(); ui.dirty = true; kick();
-    try { history.replaceState(null, "", "#word-" + (RI + 1)); } catch (e) {}
+    try { history.replaceState(null, "", "#tape-" + (RI + 1)); } catch (e) {}
   }
   function nextTape() {
     for (var k = 1; k <= ROUNDS.length; k++) { var n = (RI + k) % ROUNDS.length; if (!STATES[n].done) { focus = n; if (GL) GL.focus(n); openRound(n); return; } }
     backToShelf();
   }
-  function doReveal() {
-    var res = apply(REVEAL, ST); if (!res) return;
-    if (res.free) { ui.free = res.free; ui.dirty = true; kick(); return; }
-    save(ST); ui.free = ""; ui.revealJump = true;
-    $("live").textContent = revealLine(res);
-    if (ST.done) { ui.scroll = 0; ui.scrollR = 0; flash(); }
+  function finished() { ui.scroll = 0; ui.scrollR = 0; ui.scrollL = 0; ui.playAt = Date.now(); flash(); if (hitEls.guess) hitEls.guess.blur(); }
+  function after(res) {
+    if (!res) return false;
+    if (res.free) { ui.free = res.free; $("live").textContent = res.free; ui.dirty = true; kick(); return false; }
+    save(ST); ui.free = "";
+    $("live").textContent = kindName(res) + ". " + replyLine(res);
+    if (ST.done) finished();
     ui.dirty = true; kick();
+    return true;
   }
+  function noSignal() { ui.busy = null; ui.free = "NO SIGNAL: Wikipedia didn't answer. Try again. No stroke."; $("live").textContent = ui.free; ui.dirty = true; kick(); }
+  // the END lamp: does this page connect to the target? (asked in the background; the lamp lights when it knows)
+  function lampCheck(t) {
+    var r = R;
+    if (r.lamp[t] !== undefined || t === r.target) return;
+    r.lamp[t] = null;
+    Promise.all([resolve(t), resolve(r.target)]).then(function (p) { return connect(p[0], p[1]); }).then(function (c) { r.lamp[t] = !!c; ui.dirty = true; kick(); }, function () { delete r.lamp[t]; });
+  }
+  function doTrack() {
+    if (ui.busy || ST.done) return;
+    var cur = here(ST);
+    if (ST.tracked[cur]) { var a = ST.tracked[cur]; return after({ free: "TRACKING again, free: " + replyLine(a) }); }
+    var st = ST;
+    ui.busy = { track: true, t0: Date.now() }; ui.free = ""; ui.dirty = true; kick();
+    track(st).then(function (r) {
+      ui.busy = null;
+      st.tracked[cur] = r; st.strokes++; st.log.push(r); checkEject(st);
+      after(r);
+    }, noSignal);
+  }
+  function doRewind() { if (ui.busy) return; after(rewind(ST)); lampCheck(here(ST)); }
   function backToShelf() {
     ui.view = "shelf"; if (GL) GL.show(true); setFocus(RI); flash();
     try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
   }
-  function noSignal() { ui.nosig = Date.now() + (reduce ? 0 : 450); ui.nosigOn = true; ui.dirty = true; flash(); kick(); }
-  function channelOne() { ui.nosig = 0; ui.nosigOn = false; ui.dirty = true; flash(); kick(); }
+  function toArchive() { flash(); setTimeout(function () { location.href = "/desk"; }, reduce ? 0 : 160); }
   function toggleBW() { ui.bw = !ui.bw; ui.dirty = true; kick(); }
   function submitGuess() {
-    var el = hitEls.guess, val = (el ? el.value : ui.input).trim(); if (!val) return;
-    var res = apply(val, ST); if (!res) return;
-    if (res.free) { ui.free = res.free; $("live").textContent = res.free; ui.dirty = true; kick(); return; }
-    save(ST);
-    if (el) el.value = ""; ui.input = ""; ui.free = "";
-    var r = ST.log[ST.log.length - 1];
-    $("live").textContent = r.g + ": " + (r.kind === "found" ? "found it" : r.kind === "e" ? "echo. " + r.s.replace(/_{3,}/g, "blank") : r.kind === "c" ? "close. " + (r.line || r.note) : r.kind === "t" ? "a page of this rabbit hole" : "cold");
-    if (ST.done) { ui.scroll = 0; ui.scrollR = 0; flash(); if (el) el.blur(); }
-    ui.dirty = true; kick();
+    var el = hitEls.guess, val = (el ? el.value : ui.input).trim(); if (!val || ui.busy || ST.done) return;
+    var st = ST, pre = precheck(val, st);
+    if (pre && pre.skip) return;
+    if (pre && pre.free) return after(pre);
+    var clear = function () { if (el) el.value = ""; ui.input = ""; };
+    if (pre) { clear(); return after(record(pre, val, st)); }
+    ui.busy = { g: val, t0: Date.now() }; ui.free = ""; ui.dirty = true; kick();
+    judge(val, st).catch(function () {
+      // Wikipedia didn't answer: the AI referee judges the names as typed
+      var cur = here(st);
+      return aiJudge(cur, val, "", "").then(function (v) {
+        if (!v) throw new Error("no signal");
+        var name = val.charAt(0).toUpperCase() + val.slice(1);
+        return v.related ? { kind: "move", to: name, how: "ai", n: v.why, read: "" } : { kind: "static", to: name, read: "" };
+      });
+    }).then(function (res) {
+      ui.busy = null;
+      if (res.free) return after(res);
+      clear();
+      var r = record(res, val, st);
+      if (r.kind === "move" && !st.done) lampCheck(r.to);
+      after(r);
+    }, noSignal);
   }
   function share() {
-    var emoji = function (k) { return k === "found" ? "🟩" : k === "e" ? "🟨" : k === "c" ? "🟧" : k === "t" ? "🐇" : k === "r" ? "🔍" : "⬜"; };
+    var emoji = function (k) { return k === "move" ? "🟩" : k === "broad" ? "🟨" : k === "track" ? "🟧" : k === "static" ? "⬛" : ""; };
     var day = new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" });
-    var rows = STATES.map(function (st, i) { return (i + 1) + " " + (st.log.length ? st.log.map(function (r) { return emoji(r.kind); }).join("") : "·") + (st.done ? (st.solved ? "  +" + points(st) : "  0") : ""); });
-    var text = "Echo · The Word · " + day + " · " + dayTotal() + "/" + ROUNDS.length * MAX + "\n" + rows.join("\n") + "\nFive real rabbit holes, from the Library\n" + SHARE_URL;
+    var rows = STATES.map(function (st, i) {
+      var r = ROUNDS[i], sq = st.log.map(function (x) { return emoji(x.kind); }).join("");
+      return (i + 1) + ". " + r.start + " ··· " + r.target + "\n" + (sq || "·") + (st.done ? "  " + (st.solved ? st.strokes + " (" + golf(score(st, r)) + ")" : "ejected (" + golf(score(st, r)) + ")") : "");
+    });
+    var dt = dayTotals();
+    var text = NAME + " #" + (DATA.day || 1) + " · " + day + "\n" + (dt.done ? "Today: " + dt.strokes + " strokes, par " + dt.par + " (" + golf(dt.score) + ")" + (dt.all ? "" : ", " + dt.done + " of " + ROUNDS.length + " tapes") : "Today: no tapes finished yet") + "\n" + rows.join("\n") + "\n" + SHARE_URL;
     var ok = function () { ui.copied = "COPIED. PASTE IT IN A CHAT."; ui.dirty = true; kick(); };
     var fail = function () {
       var ta = document.createElement("textarea"); ta.className = "sharebox"; ta.value = text; ta.readOnly = true; $("screen").appendChild(ta); ta.focus(); ta.select();
@@ -996,7 +1457,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     cv.addEventListener("pointerdown", function (e) {
       var rr = cv.getBoundingClientRect(), side = ui.cols && (e.clientX - rr.left) > ui.cols.split ? "R" : "L";
       drag = { x: e.clientX, y: e.clientY, s: ui.scroll, sL: ui.scrollL || 0, sR: ui.scrollR || 0, side: side, moved: false, f: GL ? GL.state.f : focus };
-      if (GL && ui.view === "shelf" && !ui.nosigOn) GL.state.drag = true;
+      if (GL && ui.view === "shelf") GL.state.drag = true;
       try { cv.setPointerCapture(e.pointerId); } catch (er) {}
       kick();
     });
@@ -1004,18 +1465,18 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       if (!drag) return;
       var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       if (Math.abs(dx) > 6 || Math.abs(dy) > 6) drag.moved = true;
-      if (ui.view === "play") {
+      if (ui.view === "play" || ui.view === "scores") {
         if (ui.cols) { if (drag.side === "R") ui.scrollR = Math.max(0, Math.min(ui.maxR || 0, drag.sR - dy)); else ui.scrollL = Math.max(0, Math.min(ui.maxL || 0, drag.sL - dy)); }
         else ui.scroll = Math.max(0, Math.min(ui.maxScroll, drag.s - dy));
         ui.dirty = true; kick();
       }
-      else if (GL && !ui.nosigOn) { GL.state.f = Math.max(-0.4, Math.min(TAPES.length - 0.6, drag.f - dx / (cv.clientWidth * 0.3))); kick(); }
+      else if (GL) { GL.state.f = Math.max(-0.4, Math.min(TAPES.length - 0.6, drag.f - dx / (cv.clientWidth * 0.3))); kick(); }
     });
     function end(e) {
       if (!drag) return;
       var moved = drag.moved; drag = null;
       if (GL) GL.state.drag = null;
-      if (ui.view !== "shelf" || ui.nosigOn) return;
+      if (ui.view !== "shelf") return;
       if (moved) { setFocus(Math.round(GL ? GL.state.f : focus)); return; }
       if (GL && e) { var i = GL.pick(e.clientX, e.clientY); if (i < 0) { kick(); return; } if (i !== focus) setFocus(i); else insertTape(); }
     }
@@ -1023,17 +1484,20 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     cv.addEventListener("pointercancel", function () { end(null); });
     var wheelAcc = 0;
     $("screen").addEventListener("wheel", function (e) {
-      if (ui.view === "play") {
+      if (ui.view === "play" || ui.view === "scores") {
         var rr = $("screen").getBoundingClientRect();
         if (ui.cols) { if (e.clientX - rr.left > ui.cols.split) ui.scrollR = Math.max(0, Math.min(ui.maxR || 0, (ui.scrollR || 0) + e.deltaY)); else ui.scrollL = Math.max(0, Math.min(ui.maxL || 0, (ui.scrollL || 0) + e.deltaY)); }
         else ui.scroll = Math.max(0, Math.min(ui.maxScroll, ui.scroll + e.deltaY));
         ui.dirty = true; kick(); e.preventDefault();
       }
-      else if (!ui.nosigOn) { wheelAcc += Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY; if (Math.abs(wheelAcc) > 60) { setFocus(focus + (wheelAcc > 0 ? 1 : -1)); wheelAcc = 0; } e.preventDefault(); }
+      else { wheelAcc += Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY; if (Math.abs(wheelAcc) > 60) { setFocus(focus + (wheelAcc > 0 ? 1 : -1)); wheelAcc = 0; } e.preventDefault(); }
     }, { passive: false });
   }
+  // a tap anywhere but on an underlined word puts its definition away; Escape closes it, then how-to-play
+  document.addEventListener("pointerdown", function (e) { if (ui.tip && !(e.target && e.target.dataset && e.target.dataset.term)) { ui.tip = null; ui.dirty = true; kick(); } }, true);
   document.addEventListener("keydown", function (e) {
-    if (ui.view !== "shelf" || ui.nosigOn) return;
+    if (e.key === "Escape" && (ui.view === "play" || ui.view === "scores")) { if (ui.tip) ui.tip = null; else if (ui.modal) closeHelp(); ui.dirty = true; kick(); return; }
+    if (ui.view !== "shelf") return;
     if (e.key === "ArrowRight") { setFocus(focus + 1); e.preventDefault(); }
     if (e.key === "ArrowLeft") { setFocus(focus - 1); e.preventDefault(); }
     if (e.key === "Enter" && document.activeElement === document.body) insertTape();
@@ -1052,9 +1516,11 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   else { var gl0 = $("gl"), flat = document.createElement("canvas"); flat.id = "flat"; flat.setAttribute("aria-hidden", "true"); gl0.parentNode.replaceChild(flat, gl0); bindPointer(flat); }
   if (GL) GL.show(false);
   resize();
-  Promise.all([fontsReady, loadPhoto()]).then(function () {
+  fontsReady.then(function () {
     if (GL) { try { GL.addTapes(); } catch (e) {} }
     ui.loadDone = true; ui.dirty = true; kick();
   });
+  // read-only peek for tests: where each tape stands
+  window.__noclick = { tapes: function () { return STATES.map(function (st, i) { var r = ROUNDS[i]; return { slug: r.slug, par: r.par, strokes: st.strokes, path: st.path.slice(), done: st.done, solved: st.solved, ejected: st.ejected, log: st.log.map(function (x) { return x.kind; }), lastTo: st.log.length ? st.log[st.log.length - 1].to || "" : "" }; }); }, view: function () { return ui.view; }, board: function () { return { state: BOARD.state, entries: BOARD.entries.map(function (e) { return { rank: e.rank, name: e.name, score: e.score, mine: e.mine }; }), err: BOARD.err }; }, busy: function () { return !!ui.busy; }, free: function () { return ui.free; } };
 })();
 </script>
