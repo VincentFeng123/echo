@@ -2,7 +2,7 @@
 <meta name="claude:viewport-fit-sides" content="cover">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Handjet:wght@100..900&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Handjet:wght@100..900&family=Caveat:wght@700&display=swap">
 <style>
 /* Layout: one curved CRT fills the viewport. Everything you see (tapes, on-screen display, the round) is drawn into the tube and bent by it; invisible real buttons, links and a text box sit where the bent picture shows them. */
 :root {
@@ -252,7 +252,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
         if (p.kind) return p;
         if (p.title === cur) return { free: "You're on " + cur + " already. Type something connected to it." };
         if (looksBroad(p.title) || tooBroad(p.title)) return { kind: "broad", g: raw, to: p.title };
-        if (st.path.indexOf(p.title) >= 0) return { free: "You've been on " + p.title + " already. REWIND goes back for free." };
+        if (st.path.indexOf(p.title) >= 0) return { free: "You've been on " + p.title + " already. UNDO goes back for free." };
         // the step into the target has to be a real Wikipedia link or name: association alone would make every tape one move
         var last = p.title === R.target;
         return connect(a, p, { wikiOnly: last }).then(function (c) {
@@ -280,7 +280,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   }
   function rewind(st) {
     if (st.done) return null;
-    if (st.path.length < 2) return { free: "You're at the start. Nothing to rewind." };
+    if (st.path.length < 2) return { free: "You're at the start. Nothing to undo." };
     var r = { kind: "rewind", from: st.path.pop(), at: here(st) };
     st.log.push(r); return r;
   }
@@ -382,64 +382,120 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     f.lines.forEach(function (l) { cline(x, l, cx, y, f.size); y += f.lh; });
     x.restore();
   }
-  function drawCover(t, idx) {
-    var W = 640, H = 1120, c = document.createElement("canvas"); c.width = W; c.height = H;
-    var x = plainLetters(c.getContext("2d")), r = rnd(idx * 977 + 13), i;
-    var g = x.createLinearGradient(0, 0, W, H); g.addColorStop(0, "#1e1e20"); g.addColorStop(1, "#121213");
+  /* --- each puzzle is a 3.5" floppy disk: plastic in its own colour, a sliding metal shutter, a paper label --- */
+  var DISK = { w: 3.0, h: 3.1, d: 0.11, cut: 0.2, px: 256 }; // scene units; px = canvas pixels per unit
+  function mixHex(a, b, k) {
+    var pa = parseInt(a.slice(1), 16), pb = parseInt(b.slice(1), 16), out = 0;
+    for (var sh = 16; sh >= 0; sh -= 8) { var ca = (pa >> sh) & 255, cb = (pb >> sh) & 255; out |= Math.round(ca + (cb - ca) * k) << sh; }
+    return "#" + ("000000" + out.toString(16)).slice(-6);
+  }
+  function plasticOf(t) { return mixHex(t.ink, "#141416", 0.55); }
+  // the disk's front: plastic, the shutter's track and the window under it, the label (and, flat, the shutter itself)
+  function drawDiskFace(t, idx, withShutter) {
+    var P = DISK.px, W = Math.round(DISK.w * P), H = Math.round(DISK.h * P), c = document.createElement("canvas"); c.width = W; c.height = H;
+    var x = plainLetters(c.getContext("2d")), r = rnd(idx * 977 + 13), i, plastic = plasticOf(t);
+    var g = x.createLinearGradient(0, 0, W, H); g.addColorStop(0, mixHex(plastic, "#ffffff", 0.08)); g.addColorStop(1, mixHex(plastic, "#000000", 0.18));
     x.fillStyle = g; x.fillRect(0, 0, W, H);
-    for (i = 0; i < 9000; i++) { x.fillStyle = "rgba(255,255,255," + (r() * 0.05) + ")"; x.fillRect(r() * W, r() * H, 1, 1); }
-    x.strokeStyle = t.ink; x.lineWidth = 2; x.globalAlpha = .45; x.strokeRect(30, 30, W - 60, H - 60);
-    x.globalAlpha = .3; x.beginPath(); x.moveTo(30, 152); x.lineTo(W - 30, 152); x.stroke(); x.globalAlpha = 1;
-    x.fillStyle = t.ink; x.textBaseline = "alphabetic";
-    x.font = '600 15px "Handjet", ui-monospace, monospace'; var lab = "W H I T E   R A B B I T"; x.fillText(lab, W / 2 - x.measureText(lab).width / 2, 84);
-    x.font = 'italic 500 40px "Handjet", ui-monospace, monospace'; var hv = "Home Video"; x.fillText(hv, W / 2 - x.measureText(hv).width / 2, 134);
-    // the start at the top, a dotted line down, the target at the bottom
-    var stretch = 1.32, maxW = W - 96;
-    cblock(x, t.start, W / 2, 178, maxW, 300, stretch, 170);
-    x.fillStyle = t.ink;
-    for (var dy = 0; dy < 176; dy += 16) x.fillRect(W / 2 - 3, 500 + dy, 6, 8);
-    x.font = '600 30px "Handjet", ui-monospace, monospace'; var pl = "PAR " + t.par, pw = x.measureText(pl).width;
-    x.fillStyle = "#18181a"; x.fillRect(W / 2 - pw / 2 - 14, 566, pw + 28, 44); x.strokeStyle = t.ink; x.lineWidth = 2; x.strokeRect(W / 2 - pw / 2 - 14, 566, pw + 28, 44);
-    x.fillStyle = t.ink; x.fillText(pl, W / 2 - pw / 2, 599);
-    cblock(x, t.target, W / 2, 692, maxW, H - 160 - 692, stretch, 170);
-    x.strokeStyle = t.ink; x.fillStyle = t.ink; x.lineWidth = 2;
-    x.strokeRect(54, H - 120, 94, 48); x.font = 'italic 600 36px "Handjet", ui-monospace, monospace'; x.fillText("VHS", 66, H - 83);
-    x.font = '500 18px "Handjet", ui-monospace, monospace'; var no = t.no.toUpperCase(); x.fillText(no, W / 2 - x.measureText(no).width / 2, H - 88);
-    x.beginPath(); x.arc(W - 96, H - 96, 30, 0, Math.PI * 2); x.stroke();
-    x.beginPath(); x.ellipse(W - 96, H - 96, 13, 30, 0, 0, Math.PI * 2); x.stroke();
-    x.beginPath(); x.moveTo(W - 126, H - 96); x.lineTo(W - 66, H - 96); x.stroke();
-    if (t.level) { x.save(); x.translate(W - 182, 116); x.rotate(0.1); x.font = '600 24px "Handjet", ui-monospace, monospace'; var lw = x.measureText(t.level).width + 44; x.fillStyle = "#e9e4d6"; x.fillRect(0, -36, lw, 50); x.fillStyle = "#151515"; x.fillText(t.level, 22, -2); x.restore(); }
-    for (i = 0; i < 650; i++) {
-      var side = Math.floor(r() * 4), d = Math.pow(r(), 2.6) * 16, p = r();
-      var px = side === 0 ? p * W : side === 1 ? W - d : side === 2 ? p * W : d;
-      var py = side === 0 ? d : side === 1 ? p * H : side === 2 ? H - d : p * H;
-      x.fillStyle = "rgba(235,232,222," + (0.35 + r() * 0.6) + ")";
-      var sz = 1 + r() * (d < 4 ? 3 : 1.5); x.fillRect(px, py, sz, sz * (0.5 + r()));
+    for (i = 0; i < 7000; i++) { x.fillStyle = "rgba(255,255,255," + (r() * 0.035) + ")"; x.fillRect(r() * W, r() * H, 1, 1); }
+    // the shutter's track, a step down in the plastic, and the window onto the disk inside
+    var sw = Math.round(1.62 * P), sh = Math.round(1.02 * P), sx = Math.round((W - sw) / 2);
+    x.fillStyle = mixHex(plastic, "#000000", 0.3); x.fillRect(sx - 26, 0, sw + 26 + 128 + 30, sh + 16);
+    x.fillStyle = "rgba(255,255,255,.06)"; x.fillRect(sx - 26, sh + 14, sw + 184, 2);
+    x.fillStyle = "#2b1d14"; x.fillRect(200, 38, 100, sh - 76);
+    x.strokeStyle = "rgba(120,86,58,.7)"; x.lineWidth = 3; x.beginPath(); x.arc(250, sh / 2 + 140, 150, Math.PI * 1.36, Math.PI * 1.64); x.stroke();
+    // an arrow in the plastic says which way it goes in; the corner holes for write-protect and HD
+    x.fillStyle = mixHex(plastic, "#ffffff", 0.18); x.beginPath(); x.moveTo(60, 120); x.lineTo(84, 84); x.lineTo(108, 120); x.closePath(); x.fill();
+    x.fillStyle = "#0b0b0c"; x.fillRect(22, H - 70, 34, 40); x.fillRect(W - 56, H - 70, 34, 40);
+    x.fillStyle = mixHex(plastic, "#ffffff", 0.25); x.font = '600 26px "Handjet", ui-monospace, monospace'; x.fillText("HD", W - 110, H - 36);
+    // the label: strips of masking tape stuck on by hand, the start and the target written on them in pen
+    var pen = "#1d2554", by0 = Math.round(sh + 44);
+    var a1 = (r() - .5) * 0.07, a2 = (r() - .5) * 0.06, a3 = -0.05 - r() * 0.05;
+    var s1 = handFit(x, t.start, 560, 92), s2 = handFit(x, t.target, 520, 92);
+    var h1 = 40 + s1.lines.length * s1.size * 0.92, h2 = 40 + s2.lines.length * s2.size * 0.92;
+    var c1 = by0 + h1 / 2, c2 = c1 + h1 / 2 + 26 + h2 / 2;
+    maskingTape(x, W / 2 - 6, c1, 630, h1, a1, r);
+    handLines(x, s1, W / 2 - 6, c1, a1, pen, r);
+    maskingTape(x, W / 2 + 10, c2, 640, h2, a2, r);
+    // a hand-drawn arrow into the target's strip
+    x.save(); x.translate(W / 2 + 10, c2); x.rotate(a2); x.strokeStyle = pen; x.lineWidth = 4; x.lineCap = "round";
+    var ax = -300 + 12, ay = -h2 / 2 + 24;
+    x.beginPath(); x.moveTo(ax, ay - 6); x.quadraticCurveTo(ax + 6, ay + 18, ax + 30, ay + 22); x.stroke();
+    x.beginPath(); x.moveTo(ax + 20, ay + 12); x.lineTo(ax + 31, ay + 22); x.lineTo(ax + 19, ay + 30); x.stroke(); x.restore();
+    handLines(x, s2, W / 2 + 22, c2, a2, pen, r);
+    // a small tag: par, circled, and which disk
+    var cy3 = Math.min(H - 64, c2 + h2 / 2 + 46);
+    maskingTape(x, W - 220, cy3, 250, 72, a3, r);
+    x.save(); x.translate(W - 220, cy3); x.rotate(a3); x.fillStyle = pen; x.strokeStyle = pen;
+    handText(x, "par " + t.par, -70, 14, 44, r); x.lineWidth = 3; x.beginPath(); x.ellipse(-40, 0, 52, 27, -0.08, 0.3, Math.PI * 2.15); x.stroke();
+    handText(x, "#" + (idx + 1), 34, 14, 40, r); x.restore();
+    if (withShutter) { var shc = drawShutter(); x.drawImage(shc, sx, 0, sw, sh); }
+    return c;
+  }
+  // a strip of masking tape: crepe paper, torn ends, a little see-through, a soft shadow
+  function maskingTape(x, cx, cy, w, h, ang, r) {
+    x.save(); x.translate(cx, cy); x.rotate(ang);
+    var edge = function (fromY, toY, side) { for (var yy = fromY; side > 0 ? yy <= toY : yy >= toY; yy += side * h / 9) x.lineTo(side * w / 2 + (r() - .5) * 16, yy); };
+    x.beginPath(); x.moveTo(-w / 2, -h / 2);
+    for (var xx = -w / 2; xx <= w / 2; xx += 40) x.lineTo(xx, -h / 2 + (r() - .5) * 2);
+    edge(-h / 2, h / 2, 1);
+    for (xx = w / 2; xx >= -w / 2; xx -= 40) x.lineTo(xx, h / 2 + (r() - .5) * 2);
+    edge(h / 2, -h / 2, -1); x.closePath();
+    x.shadowColor = "rgba(0,0,0,.4)"; x.shadowBlur = 8; x.shadowOffsetY = 3;
+    var g = x.createLinearGradient(0, -h / 2, 0, h / 2); g.addColorStop(0, "rgba(236,226,192,.95)"); g.addColorStop(.5, "rgba(228,216,178,.93)"); g.addColorStop(1, "rgba(218,205,165,.95)");
+    x.fillStyle = g; x.fill(); x.shadowColor = "transparent";
+    x.save(); x.clip();
+    for (var i = 0; i < 70; i++) { x.strokeStyle = "rgba(120,100,60," + (0.03 + r() * 0.05) + ")"; x.lineWidth = 1 + r() * 2; var yy0 = -h / 2 + r() * h; x.beginPath(); x.moveTo(-w / 2, yy0); x.lineTo(w / 2, yy0 + (r() - .5) * 6); x.stroke(); }
+    for (i = 0; i < 1800; i++) { x.fillStyle = "rgba(90,70,40," + (r() * 0.06) + ")"; x.fillRect(-w / 2 + r() * w, -h / 2 + r() * h, 1.5, 1.5); }
+    x.fillStyle = "rgba(255,255,255,.12)"; x.fillRect(-w / 2, -h / 2, w, 5);
+    x.restore(); x.restore();
+  }
+  // handwriting: letter by letter, each a little tilted, off the line and its own size, so no two are alike
+  var HAND = '"Caveat", "Handjet", cursive';
+  function handText(x, text, x0, y0, size, r) {
+    var cx = x0;
+    for (var i = 0; i < text.length; i++) {
+      var ch = text[i], sz = size * (0.94 + r() * 0.12);
+      x.font = "700 " + sz.toFixed(1) + "px " + HAND;
+      x.save(); x.translate(cx, y0 + (r() - .5) * size * 0.08); x.rotate((r() - .5) * 0.12); x.fillText(ch, 0, 0); x.restore();
+      cx += x.measureText(ch).width * (0.96 + r() * 0.06);
     }
-    for (i = 0; i < 16; i++) { x.strokeStyle = "rgba(255,255,255," + (0.04 + r() * 0.09) + ")"; x.lineWidth = 1; x.beginPath(); var sx = r() * W, sy = r() * H; x.moveTo(sx, sy); x.lineTo(sx + (r() - .5) * 420, sy + (r() - .5) * 760); x.stroke(); }
-    for (i = 0; i < 6; i++) { x.fillStyle = "rgba(0,0,0," + (0.12 + r() * 0.22) + ")"; x.beginPath(); x.ellipse(r() * W, r() * H, 20 + r() * 80, 8 + r() * 30, r() * 3, 0, Math.PI * 2); x.fill(); }
-    return c;
+    return cx - x0;
   }
-  function drawSide(t) {
-    var c = document.createElement("canvas"); c.width = 64; c.height = 1120; var x = plainLetters(c.getContext("2d"));
-    x.fillStyle = "#151516"; x.fillRect(0, 0, 64, 1120);
-    x.fillStyle = "rgba(255,255,255,.07)"; x.fillRect(0, 0, 3, 1120); x.fillRect(61, 0, 3, 1120);
-    x.save(); x.translate(40, 1060); x.rotate(-Math.PI / 2); x.fillStyle = t.ink; x.globalAlpha = .8; x.font = '600 20px "Handjet", ui-monospace, monospace'; x.fillText("WHITE RABBIT · NO CLICKING · " + (t.level ? t.level + " · " : "") + "VHS", 0, 0); x.restore();
-    return c;
+  // the biggest handwriting that fits a width, on one line or two
+  function handFit(x, text, maxW, maxSize) {
+    for (var size = maxSize; size >= 34; size -= 4) {
+      x.font = "700 " + size + "px " + HAND;
+      if (x.measureText(text).width * 1.04 <= maxW) return { size: size, lines: [text] };
+      var words = text.split(/\s+/), best = null;
+      for (var k = 1; k < words.length; k++) { var l1 = words.slice(0, k).join(" "), l2 = words.slice(k).join(" "), wmax = Math.max(x.measureText(l1).width, x.measureText(l2).width); if (wmax * 1.04 <= maxW && (!best || wmax < best.w)) best = { w: wmax, lines: [l1, l2] }; }
+      if (best && size <= maxSize - 8) return { size: size, lines: best.lines };
+    }
+    return { size: 34, lines: [text] };
   }
-  function drawCassette() {
-    var c = document.createElement("canvas"); c.width = 600; c.height = 300; var x = c.getContext("2d");
-    var g = x.createLinearGradient(0, 0, 0, 300); g.addColorStop(0, "#1c1c1e"); g.addColorStop(1, "#0b0b0c"); x.fillStyle = g; x.fillRect(0, 0, 600, 300);
-    x.fillStyle = "#050505"; x.fillRect(150, 60, 300, 120);
-    [225, 375].forEach(function (cx) {
-      x.fillStyle = "#2a2b2e"; x.beginPath(); x.arc(cx, 120, 42, 0, Math.PI * 2); x.fill();
-      x.fillStyle = "#0b0b0c"; x.beginPath(); x.arc(cx, 120, 14, 0, Math.PI * 2); x.fill();
-      x.strokeStyle = "#3a3b3f"; x.lineWidth = 3;
-      for (var a = 0; a < 6; a++) { x.beginPath(); x.moveTo(cx + Math.cos(a) * 16, 120 + Math.sin(a) * 16); x.lineTo(cx + Math.cos(a) * 38, 120 + Math.sin(a) * 38); x.stroke(); }
+  function handLines(x, fit, cx, cy, ang, ink, r) {
+    x.save(); x.translate(cx, cy); x.rotate(ang); x.fillStyle = ink;
+    var lh = fit.size * 0.92, y0 = -((fit.lines.length - 1) * lh) / 2 + fit.size * 0.3;
+    fit.lines.forEach(function (l, k) { x.font = "700 " + fit.size + "px " + HAND; var w = x.measureText(l).width; handText(x, l, -w / 2 + (r() - .5) * 10, y0 + k * lh, fit.size, r); });
+    x.restore();
+  }
+  function drawShutter() {
+    // brushed aluminium (the reflections come from the material); the slot shows the dark disk behind
+    var c = document.createElement("canvas"); c.width = 512; c.height = 322; var x = c.getContext("2d"), r = rnd(7);
+    x.fillStyle = "#d2d5da"; x.fillRect(0, 0, 512, 322);
+    for (var i = 0; i < 900; i++) { var yy = r() * 322, v = r(); x.fillStyle = v > .5 ? "rgba(255,255,255," + (v * 0.18) + ")" : "rgba(60,64,70," + (v * 0.16) + ")"; x.fillRect(0, yy, 512, 0.6 + r() * 1.4); }
+    // a diagonal glint, the way light catches brushed aluminium
+    [[90, 70, .34], [200, 26, .2]].forEach(function (b) {
+      var gl = x.createLinearGradient(b[0], 0, b[0] + b[1] + 160, 322);
+      gl.addColorStop(0, "rgba(255,255,255,0)"); gl.addColorStop(.45, "rgba(255,255,255," + b[2] + ")"); gl.addColorStop(.55, "rgba(255,255,255," + b[2] + ")"); gl.addColorStop(1, "rgba(255,255,255,0)");
+      x.fillStyle = gl; x.beginPath(); x.moveTo(b[0], 0); x.lineTo(b[0] + b[1], 0); x.lineTo(b[0] + b[1] + 160, 322); x.lineTo(b[0] + 160, 322); x.closePath(); x.fill();
     });
-    x.strokeStyle = "rgba(255,255,255,.08)"; x.lineWidth = 3; x.strokeRect(6, 6, 588, 288);
+    x.fillStyle = "rgba(0,0,0,.08)"; x.fillRect(0, 0, 512, 6); x.fillRect(0, 316, 512, 6);
+    x.fillStyle = "#1a1a1c"; x.fillRect(185, 48, 124, 226);
+    x.fillStyle = "rgba(255,255,255,.35)"; x.fillRect(185, 274, 124, 2);
     return c;
   }
+
+
 
   /* ================= the picture: everything on the tube is drawn here ================= */
   var COL = { osd: "#d9d6ce", dim: "#b0ada6", faint: "#86847e", rose: "#d4a3af", white: "#f4f2ed", ink: "#e6dcae", line: "rgba(214,211,203,.2)", found: "#6cc070", e: "#e8c547", c: "#e88a3c", cold: "#cfcac0", flip: "#d65a4a" };
@@ -492,26 +548,26 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   /* --- words of the game: a dotted underline, and a definition on hover or tap --- */
   var GLOSSARY = [
     { k: "END lamp", re: /\bEND lamp\b/, d: "Lights up when the page you're on connects to the target. Then the target itself is your next step." },
-    { k: "RABBIT lamp", re: /\bRABBIT lamp\b/, d: "Lights up when you're on a page of the real rabbit hole this tape came from." },
+    { k: "RABBIT lamp", re: /\bRABBIT lamp\b/, d: "Lights up when you're on a page of the real rabbit hole this disk came from." },
     { k: "even par", re: /\beven par\b/i, d: "The same number of strokes as the rabbit took." },
     { k: "double bogey", re: /\bdouble bogey\b/i, d: "Two strokes over par." },
     { k: "bogey", re: /\bbogey\b/i, d: "One stroke over par." },
     { k: "birdie", re: /\bbirdie\b/i, d: "One stroke under par: you beat the rabbit." },
     { k: "eagle", re: /\beagle\b/i, d: "Two strokes under par." },
     { k: "par", re: /\bpar\b/i, d: "How many steps the real rabbit hole took. Finish in fewer strokes and you beat the rabbit." },
-    { k: "stroke", re: /\bstrokes?\b/i, d: "Each step costs one, and so does each miss and each TRACKING. Fewer is better, like golf." },
+    { k: "stroke", re: /\bstrokes?\b/i, d: "Each step costs one, and so does each miss and each HINT. Fewer is better, like golf." },
     { k: "static", re: /\bstatic\b/i, d: "A guess that doesn't connect to the page you're on. It costs a stroke." },
     { k: "referee", re: /\breferee\b/i, d: "A small AI that judges a step Wikipedia doesn't settle: would most people see a clear, specific connection? It never judges the last step into the target." },
     { k: "by association", re: /\bby association\b/i, d: "Wikipedia doesn't link the two pages, but the referee says most people would see the connection." },
-    { k: "TRACKING", re: /\btracking\b/i, d: "Costs a stroke. Names a page linked from here that's one step from the target." },
-    { k: "REWIND", re: /\brewind\b/i, d: "Steps back one page for free. Strokes already spent stay spent." },
+    { k: "HINT", re: /\bhint\b/i, d: "Costs a stroke. Names a page linked from here that's one step from the target." },
+    { k: "UNDO", re: /\bundo\b/i, d: "Steps back one page for free. Strokes already spent stay spent." },
     { k: "too broad", re: /\btoo broad\b/i, d: "Topics that connect to almost everything don't count. Years, dates and lists always; in Medium and Hard also Wikipedia's ~1,000 core subjects (Music, Film, Food, Science...) and countries. Free, except in Hard mode." },
     { k: "not found", re: /\bnot found\b/i, d: "No Wikipedia page goes by that name. It's free: try another name for it." },
-    { k: "eject", re: /\beject(s|ed)?\b/i, d: "Run out of strokes without reaching the target (par + 5, or par + 3 in Hard mode) and the tape ejects and plays the rabbit's route." },
+    { k: "eject", re: /\beject(s|ed)?\b/i, d: "Run out of strokes without reaching the target (par + 5, or par + 3 in Hard mode) and the disk ejects and plays the rabbit's route." },
     { k: "Easy mode", re: /\beasy mode\b/i, d: "Big topics count (music, film, a country), names count however they're written, and the referee is generous. Only years, dates and lists are too broad." },
     { k: "Medium mode", re: /\bmedium mode\b/i, d: "Be specific: umbrella topics are too broad (free), a one-word name only counts written as a name, and the referee wants a specific connection." },
-    { k: "Hard mode", re: /\bhard mode\b/i, d: "Real links only: the pages have to link each other. No names, no referee. A too-broad guess costs a stroke, and the tape ejects at par + 3." },
-    { k: "rabbit hole", re: /\brabbit hole\b/i, d: "A trail of Wikipedia pages someone on White Rabbit really followed. Each tape is made from one." }
+    { k: "Hard mode", re: /\bhard mode\b/i, d: "Real links only: the pages have to link each other. No names, no referee. A too-broad guess costs a stroke, and the disk ejects at par + 3." },
+    { k: "rabbit hole", re: /\brabbit hole\b/i, d: "A trail of Wikipedia pages someone on White Rabbit really followed. Each disk is made from one." }
   ];
   // the Wikipedia pages this tape has put on screen: they explain themselves too ("Oramics: a drawn sound technique…")
   var PAGE_TERMS = {};
@@ -585,12 +641,12 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     var tg = title(R.target), st = title(R.start);
     var body = [
       "Get from " + st + " to " + tg + ", one connection at a time. Nothing to click: type anything.",
-      "You're in " + MODES[MODE].name.charAt(0) + MODES[MODE].name.slice(1).toLowerCase() + " mode. Switch modes on the tape shelf; each keeps its own progress and leaderboard.",
+      "You're in " + MODES[MODE].name.charAt(0) + MODES[MODE].name.slice(1).toLowerCase() + " mode. Switch modes on the shelf; each keeps its own progress and leaderboard.",
       MODE === "hard" ? "• A step counts only when one Wikipedia page links the other: no names, no referee." : "• A step counts when its Wikipedia page and the one you're on link or name each other, or when the referee sees a " + (MODE === "easy" ? "clear connection: nutmeg → nuts → squirrel → animal." : "clear, specific connection: nutmeg → nuts → squirrel → acorn."),
       "• Each step is a stroke. Par is " + R.par + ", the steps the real rabbit hole took. Fewer strokes beats the rabbit.",
       (MODE === "easy" ? "• Big topics like music, film or a country are fine here; only years, dates and lists are too broad." : "• Be specific: umbrella topics like music, film, food or a country are too broad and don't count" + (MODE === "hard" ? ", and in Hard mode they cost a stroke." : " (free, but no help).")) + " A guess that connects nothing is static and costs a stroke. Names Wikipedia doesn't know are free.",
-      MODE === "hard" ? "• Run out of strokes at par + 3 and the tape ejects." : "• The last step into " + tg + " has to be a real Wikipedia link or name; the referee's associations don't count for it.",
-      "• Stuck? TRACKING (+1 stroke) names a page that leads toward " + tg + ". REWIND steps back a page for free.",
+      MODE === "hard" ? "• Run out of strokes at par + 3 and the disk ejects." : "• The last step into " + tg + " has to be a real Wikipedia link or name; the referee's associations don't count for it.",
+      "• Stuck? HINT (+1 stroke) names a page that leads toward " + tg + ". UNDO steps back a page for free.",
       "• The END lamp lights on a page that connects to " + tg + "; the RABBIT lamp on a page of the real rabbit hole.",
       "Underlined words explain themselves: hover or tap them."
     ];
@@ -661,7 +717,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     var bwl = "B&W [" + (ui.bw ? "ON" : "OFF") + "]", bww = T(bwl, mx, by, { size: bs }); hit("bw", mx - 6, by - bs, bww + 12, bs + 10, "button", { label: "Black and white", onClick: toggleBW });
     var lw = W_("WHITERABBT.COM ↗", bs, FF.vcr); T("WHITERABBT.COM ↗", W - mx - lw, by, { size: bs }); hit("wr", W - mx - lw - 6, by - bs, lw + 12, bs + 10, "link", { label: "White Rabbit", href: "https://whiterabbt.com" });
     var t = TAPES[focus], fst = STATES[t.ri], r = ROUNDS[t.ri], cs = narrow ? 20 : 22, cy = H - my - (narrow ? 118 : 104);
-    T("TAPE " + (t.ri + 1) + " OF " + ROUNDS.length + " · " + t.level, W / 2, cy, { size: cs, color: COL.rose, align: "center" });
+    T("DISK " + (t.ri + 1) + " OF " + ROUNDS.length + " · " + t.level, W / 2, cy, { size: cs, color: COL.rose, align: "center" });
     // today's running total: "1: +6 (Par 3)   2: E (Par 4)   3: +5 (Par 5)   Total: +11 (Par 12)", on two lines when it won't fit
     var dt = dayTotals(), dsz = narrow ? 16 : 19, gap = narrow ? "   " : "      ";
     var cells = ROUNDS.map(function (r, i) { var s = score(STATES[i], r); return (i + 1) + ": " + (s === null ? "–" : golf(s)) + " (Par " + r.par + ")"; });
@@ -688,9 +744,9 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     var line = fst.done ? (fst.solved ? "IN " + fst.strokes + " · PAR " + r.par + " · " + golf(score(fst, r)) : "EJECTED · " + golf(score(fst, r))) : (t.start + " → " + t.target).toUpperCase() + " · PAR " + r.par;
     font(cs, FF.vcr); if (X.measureText(line).width > W - mx * 2) line = fst.done ? line : "PAR " + r.par + " · MAKE YOUR OWN TRAIL";
     T(line, W / 2, cy + cs * 1.2, { size: cs, color: COL.white, align: "center" });
-    var label = fst.done ? "SEE TAPE ▶" : fst.log.length ? "RESUME ▶" : "PLAY ▶";
+    var label = fst.done ? "SEE DISK ▶" : fst.log.length ? "RESUME ▶" : "PLAY ▶";
     var bwid = W_(label, 24, FF.vcr) + 44;
-    button("play", label, W / 2 - bwid / 2, cy + cs * 1.2 + 16, bwid, 44, { primary: !fst.done, onClick: insertTape, label: "Play tape " + (t.ri + 1) + ": " + t.start + " to " + t.target });
+    button("play", label, W / 2 - bwid / 2, cy + cs * 1.2 + 16, bwid, 44, { primary: !fst.done, onClick: insertTape, label: "Play disk " + (t.ri + 1) + ": " + t.start + " to " + t.target });
     if (!ui.gl) drawFlatTape();
   }
   function drawLoading() {
@@ -703,18 +759,18 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   }
   var flatCover = null, flatCovers = {};
   function drawFlatTape() {
-    flatCover = (flatCovers[focus] = flatCovers[focus] || drawCover(TAPES[focus], focus));
-    var H = ui.H, W = ui.W, h = H * .44, w = h * .571;
+    flatCover = (flatCovers[focus] = flatCovers[focus] || drawDiskFace(TAPES[focus], focus, true));
+    var H = ui.H, W = ui.W, w = Math.min(W * .56, H * .42 * DISK.w / DISK.h), h = w * DISK.h / DISK.w;
     X.drawImage(flatCover, W / 2 - w / 2, H * .2, w, h);
-    hit("flat", W / 2 - w / 2, H * .2, w, h, "button", { label: "Today's tape", onClick: insertTape });
+    hit("flat", W / 2 - w / 2, H * .2, w, h, "button", { label: "Today's disk", onClick: insertTape });
   }
 
   /* --- a tape in play, drawn as columns: your route on the left, typing on the right (stacked on phones) --- */
   function drawPlay() {
     var W = ui.W, H = ui.H, narrow = W < 760, mx = W * (narrow ? .09 : .085), my = H * (narrow ? .065 : .08) + ui.safeT;
     var hy = my + 18, hs = narrow ? 21 : 24;
-    var bw = T("◀ TAPES", mx, hy, { size: hs }); hit("back", mx - 6, hy - hs, bw + 12, hs + 10, "button", { label: "Back to the tapes", onClick: backToShelf });
-    if (!narrow) T("TAPE " + (RI + 1) + " OF " + ROUNDS.length + " · " + rules().name + " MODE", W / 2, hy, { size: hs, color: COL.white, align: "center", terms: true, fixed: true });
+    var bw = T("◀ DISKS", mx, hy, { size: hs }); hit("back", mx - 6, hy - hs, bw + 12, hs + 10, "button", { label: "Back to the disks", onClick: backToShelf });
+    if (!narrow) T("DISK " + (RI + 1) + " OF " + ROUNDS.length + " · " + rules().name + " MODE", W / 2, hy, { size: hs, color: COL.white, align: "center", terms: true, fixed: true });
     var ct = ST.done ? (ST.solved ? "IN " + ST.strokes + " · " + golfName(score(ST, R)) : "EJECTED") : "STROKES " + ST.strokes + " · PAR " + R.par;
     var cw = W_(ct, hs, FF.vcr); T(ct, W - mx - cw, hy, { size: hs, terms: true, fixed: true });
     var bottom = H - my * .6 - ui.safeB;
@@ -751,7 +807,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     ui.cols = { split: divX }; ui.clip = [splitTop, bottom];
   }
   function drawHead(x, y, w, narrow) {
-    var ks = narrow ? 17 : 18, chip = narrow ? "TAPE " + (RI + 1) + " OF " + ROUNDS.length + " · " + rules().name : "FROM THE LIBRARY", chipW = W_(chip, ks, FF.vcr) + 14;
+    var ks = narrow ? 17 : 18, chip = narrow ? "DISK " + (RI + 1) + " OF " + ROUNDS.length + " · " + rules().name : "FROM THE LIBRARY", chipW = W_(chip, ks, FF.vcr) + 14;
     X.strokeStyle = COL.rose; X.lineWidth = 1.5; X.strokeRect(x + .75, y + .75, chipW - 1.5, ks + 8);
     T(chip, x + 7, y + ks + 2, { size: ks, color: COL.rose });
     var hl = "? HOW TO PLAY", hw = W_(hl, ks, FF.vcr);
@@ -761,7 +817,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     var hsz = narrow ? Math.max(30, Math.min(42, ui.W * .09)) : Math.max(36, Math.min(54, ui.W * .04));
     y += para(title(R.start) + "  →  " + title(R.target), x, y - hsz * .18, w, { size: hsz, fam: FF.serif, color: COL.white, lh: hsz * 1.02, glow: 5, terms: true, fixed: true }) + 2;
     var dts = dayTotals();
-    var sub = "PAR " + R.par + " · " + (ST.done ? "THE TAPE PLAYED OUT" : "THE RABBIT TOOK " + R.par + ". MAKE YOUR OWN TRAIL.") + (dts.done && !ST.done ? " · TODAY " + golf(dts.score) + " SO FAR" : "");
+    var sub = "PAR " + R.par + " · " + (ST.done ? "THE DISK PLAYED OUT" : "THE RABBIT TOOK " + R.par + ". MAKE YOUR OWN TRAIL.") + (dts.done && !ST.done ? " · TODAY " + golf(dts.score) + " SO FAR" : "");
     y += para(sub, x, y, w, { size: narrow ? 17 : 18, fam: FF.vcr, color: COL.dim, lh: 21, terms: true, fixed: true });
     return y;
   }
@@ -770,9 +826,9 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     return y + 36;
   }
   function kindName(r) {
-    return r.kind === "move" ? (r.to === R.target ? "REACHED · +1" : "MOVE · +1") : r.kind === "broad" ? (r.cost ? "TOO BROAD · +1" : "TOO BROAD · FREE") : r.kind === "dym" ? (r.none ? "NOT FOUND · FREE" : r.guess ? "NOT SURE · FREE" : "WHICH ONE? · FREE") : r.kind === "track" ? "TRACKING · +1" : r.kind === "rewind" ? "REWOUND · FREE" : "STATIC · +1";
+    return r.kind === "move" ? (r.to === R.target ? "REACHED · +1" : "MOVE · +1") : r.kind === "broad" ? (r.cost ? "TOO BROAD · +1" : "TOO BROAD · FREE") : r.kind === "dym" ? (r.none ? "NOT FOUND · FREE" : r.guess ? "NOT SURE · FREE" : "WHICH ONE? · FREE") : r.kind === "track" ? "HINT · +1" : r.kind === "rewind" ? "UNDONE · FREE" : "STATIC · +1";
   }
-  function kindShort(k) { return k === "move" ? "MOVE" : k === "broad" ? "TOO BROAD" : k === "dym" ? "WHICH?" : k === "track" ? "TRACKING" : k === "rewind" ? "REWIND" : "STATIC"; }
+  function kindShort(k) { return k === "move" ? "MOVE" : k === "broad" ? "TOO BROAD" : k === "dym" ? "WHICH?" : k === "track" ? "HINT" : k === "rewind" ? "UNDO" : "STATIC"; }
   // how a step connects, in words: "Squirrel's page links Nut"
   function howLine(r) {
     return r.how === "link" ? r.at + "'s page links " + r.to + "." : r.how === "back" ? r.to + "'s page links " + r.at + "." : r.how === "names" ? r.at + "'s page names " + (r.n || r.to) + "." : r.how === "named" ? r.to + "'s page names " + (r.n || r.at) + "." : r.how === "ai" ? "By association: " + (r.n || r.at + " and " + r.to + " are related.") : "";
@@ -789,7 +845,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     if (r.kind === "broad") return (r.to && norm(r.to) !== norm(r.g) ? "“" + r.g + "” means " + r.to + ", which" : "“" + r.g + "”") + " is too broad: big umbrella topics (music, film, food, a country...), years and lists connect to everything. Be more specific. " + (r.cost ? "In Hard mode that costs a stroke." : "No stroke.");
     if (r.kind === "dym" && r.guess) return "No page is called “" + r.g + "”, so it was read as " + r.guess + ", and that doesn't connect to " + at + ". Since that was a guess at what you meant, no stroke: try the page's exact name.";
     if (r.kind === "dym") return r.none ? "Couldn't find a Wikipedia page that is “" + r.g + "”." + (r.opts.length ? " Closest: " + r.opts.join(", ") + "." : "") + " Try its exact name. No stroke." : "Which one? “" + r.g + "” could be " + r.opts.join(", ") + ", and none of them connects to " + at + ". Try one by its full name. No stroke.";
-    if (r.kind === "track") return r.via ? at + "'s page links " + r.via + ", and " + r.via + " is one step from " + tg + "." : r.far ? "Nothing " + at + " links is one step from " + tg + ". But " + r.far + " is. Find your way there." : "No track from here. REWIND is free.";
+    if (r.kind === "track") return r.via ? at + "'s page links " + r.via + ", and " + r.via + " is one step from " + tg + "." : r.far ? "Nothing " + at + " links is one step from " + tg + ". But " + r.far + " is. Find your way there." : "No hint from here. UNDO is free.";
     if (r.kind === "rewind") return "Back on " + at + ". No stroke.";
     if (MODE === "hard") return "Neither page links the other: " + at + " and " + (r.to || "“" + r.g + "”") + ". In Hard mode only real links count. One stroke.";
     if (r.last) return "Wikipedia doesn't tie " + at + " to " + tg + ". The last step into the target has to be a real link or name, not just an association. One stroke.";
@@ -832,8 +888,8 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     button("enter", "ENTER", x + w - bW, y, bW, fh, { primary: true, onClick: submitGuess, label: "Enter" });
     y += fh + 10;
     var half = (w - 10) / 2, tracked = !!ST.tracked[cur];
-    button("track", tracked ? (narrow ? "TRACKING · FREE" : "TRACKING AGAIN · FREE") : "TRACKING · +1", x, y, half, 44, { size: 20, onClick: doTrack, label: "Tracking: a page one step from the target. Costs one stroke.", term: "TRACKING" });
-    button("rewind", "◀◀ REWIND · FREE", x + half + 10, y, half, 44, { size: 20, onClick: doRewind, label: "Rewind one page, free", term: "REWIND" });
+    button("track", tracked ? (narrow ? "HINT · FREE" : "HINT AGAIN · FREE") : "HINT · +1", x, y, half, 44, { size: 20, onClick: doTrack, label: "Hint: a page one step from the target. Costs one stroke.", term: "HINT" });
+    button("rewind", "◀ UNDO · FREE", x + half + 10, y, half, 44, { size: 20, onClick: doRewind, label: "Undo one page, free", term: "UNDO" });
     y += 54;
     if (ui.free) y += para(ui.free, x, y, w, { size: 15, fam: FF.mono, color: COL.osd }) + 4;
     var r = ST.log[ST.log.length - 1];
@@ -841,7 +897,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       // checking with Wikipedia: the box tunes in
       var by0 = y, bh = 86;
       X.strokeStyle = COL.line; X.lineWidth = 1.5; X.strokeRect(x + .75, by0 + .75, w - 1.5, bh);
-      font(22, FF.vcr); var bt = ui.busy.track ? "TRACKING…" : (ui.busy.ai ? "ASKING THE REFEREE: “" : "TUNING IN “") + String(ui.busy.g).toUpperCase() + "”";
+      font(22, FF.vcr); var bt = ui.busy.track ? "FINDING A HINT…" : (ui.busy.ai ? "ASKING THE REFEREE: “" : "TUNING IN “") + String(ui.busy.g).toUpperCase() + "”";
       while (X.measureText(bt).width > w - 32 && bt.length > 12) bt = bt.slice(0, -3) + "”";
       T(bt, x + 16, by0 + 34, { size: 22, color: COL.white });
       var n = Math.floor((w - 32) / 6), ph0 = Math.floor(Date.now() / 90);
@@ -852,7 +908,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       sq(r.kind, x + 16, y + 2, 22);
       var tn = kindName(r), tnw = W_(tn, 19, FF.vcr);
       T(tn, x + w - 16 - tnw, y + 20, { size: 19, color: COL.rose, terms: true });
-      var head = r.kind === "track" ? "TRACKING" : r.kind === "rewind" ? "◀◀ " + title(r.at).toUpperCase() : String(r.g).toUpperCase();
+      var head = r.kind === "track" ? "HINT" : r.kind === "rewind" ? "◀ " + title(r.at).toUpperCase() : String(r.g).toUpperCase();
       var gh = para(head, x + 48, y - 5, w - 48 - 16 - tnw - 14, { size: 26, fam: FF.vcr, color: "#fff", lh: 28 });
       y += Math.max(36, gh + 8);
       y += para(replyLine(r), x + 16, y, w - 32, { size: 16, fam: FF.mono, pre: "500", color: COL.osd, lh: 25, terms: true }) + 2;
@@ -868,7 +924,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     list.forEach(function (r) {
       sq(r.kind, x, y + 3, 16);
       var tw = W_(kindShort(r.kind), 17, FF.vcr); T(kindShort(r.kind), x + w - tw, y + 17, { size: 17, color: COL.faint, glow: 0 });
-      var txt = r.kind === "track" ? "TRACKING ON " + title(r.at).toUpperCase() : r.kind === "rewind" ? "BACK TO " + title(r.at).toUpperCase() : String(r.g).toUpperCase() + (r.kind === "move" && norm(r.g) !== norm(title(r.to)) ? " → " + title(r.to).toUpperCase() : "");
+      var txt = r.kind === "track" ? "HINT ON " + title(r.at).toUpperCase() : r.kind === "rewind" ? "BACK TO " + title(r.at).toUpperCase() : String(r.g).toUpperCase() + (r.kind === "move" && norm(r.g) !== norm(title(r.to)) ? " → " + title(r.to).toUpperCase() : "");
       var lh2 = para(txt, x + 28, y - 3, w - 28 - tw - 14, { size: 20, fam: FF.vcr, color: COL.osd, lh: 22, terms: true });
       y += Math.max(28, lh2 + 6);
     });
@@ -935,7 +991,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       y = drawSection("▶ THE RABBIT'S ROUTE · @" + R.hole.author.toUpperCase(), x, y, w);
       y = drawChain(rabbitNodes(shown), x, y, w, { size: 22, noteLines: 3 });
       y = drawRabbitEnd(x, y, w, shown);
-      return ST.log.length ? drawLogList(ST.log.slice().reverse(), x, y + 18, w, "YOUR TAPE") : y;
+      return ST.log.length ? drawLogList(ST.log.slice().reverse(), x, y + 18, w, "YOUR GUESSES") : y;
     }
     var half = (w - 24) / 2, ya = drawSection("YOUR ROUTE", x, y, half), yb = drawSection("▶ THE RABBIT'S ROUTE", x + half + 24, y, half);
     ya = drawChain(yours, x, ya, half, { size: 22 });
@@ -951,17 +1007,17 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     var big = ST.solved ? "IN " + ST.strokes + " · " + golfName(score(ST, R)) : "EJECTED · " + golf(score(ST, R));
     T(big, x + 18, y + 30, { size: 40, color: "#fff", glow: 4, terms: true }); y += 44;
     var extra = ST.strokes - moves(ST);
-    var sub = ST.solved ? moves(ST) + (moves(ST) === 1 ? " MOVE" : " MOVES") + (extra ? " + " + extra + (extra === 1 ? " MORE STROKE" : " MORE STROKES") : "") + " · " + (ST.strokes < R.par ? "YOU BEAT THE RABBIT'S " + R.par : ST.strokes === R.par ? "SAME AS THE RABBIT" : "THE RABBIT TOOK " + R.par) : "THE TAPE RAN OUT AT PAR + " + EJECT + ". IT PLAYS THE RABBIT'S ROUTE.";
+    var sub = ST.solved ? moves(ST) + (moves(ST) === 1 ? " MOVE" : " MOVES") + (extra ? " + " + extra + (extra === 1 ? " MORE STROKE" : " MORE STROKES") : "") + " · " + (ST.strokes < R.par ? "YOU BEAT THE RABBIT'S " + R.par : ST.strokes === R.par ? "SAME AS THE RABBIT" : "THE RABBIT TOOK " + R.par) : "THE DISK RAN OUT AT PAR + " + EJECT + ". IT PLAYS THE RABBIT'S ROUTE.";
     y += para(sub, x + 18, y, w - 36, { size: 18, fam: FF.vcr, color: COL.dim, lh: 21, terms: true }) + 6;
     y += para("“" + R.hole.title + "”", x + 18, y + 4, w - 36, { size: 24, fam: FF.serif, pre: "italic 500", color: COL.white, lh: 28 });
-    y += para("@" + R.hole.author.toUpperCase() + "'S RABBIT HOLE, WHERE THIS TAPE CAME FROM", x + 18, y + 4, w - 36, { size: 16, fam: FF.vcr, color: COL.rose, lh: 19 }) + 12;
+    y += para("@" + R.hole.author.toUpperCase() + "'S RABBIT HOLE, WHERE THIS DISK CAME FROM", x + 18, y + 4, w - 36, { size: 16, fam: FF.vcr, color: COL.rose, lh: 19 }) + 12;
     ST.log.forEach(function (r, i) { var cols = Math.floor((w - 36) / 24); sq(r.kind, x + 18 + (i % cols) * 24, y + Math.floor(i / cols) * 24, 18); });
     y += 24 * Math.ceil(ST.log.length / Math.max(1, Math.floor((w - 36) / 24))) + 12;
     var left = STATES.some(function (st) { return !st.done; }), dt = dayTotals();
     // the day so far, in one line here; the full card sits under the buttons
     y += para(left ? "TODAY SO FAR · " + dt.strokes + " STROKES · PAR " + dt.par + " · " + golf(dt.score) + " AFTER " + dt.done + " OF " + ROUNDS.length : "TODAY · " + dt.strokes + " STROKES · PAR " + dt.allPar + " · " + golf(dt.score),
       x + 18, y + 2, w - 36, { size: left ? 19 : 26, fam: FF.vcr, color: COL.ink, lh: left ? 22 : 28, glow: left ? 0 : 4, terms: true }) + 10;
-    if (left) button("next", "NEXT TAPE ▶", x + 18, y, w - 36, 50, { primary: true, onClick: nextTape, label: "Next tape" });
+    if (left) button("next", "NEXT DISK ▶", x + 18, y, w - 36, 50, { primary: true, onClick: nextTape, label: "Next disk" });
     else button("next", narrow ? "TODAY'S SCORE ▶" : "TODAY'S SCORE & LEADERBOARD ▶", x + 18, y, w - 36, 50, { primary: true, onClick: openScores, label: "Today's score and leaderboard" });
     y += 60;
     button("hole", narrow ? "OPEN THIS RABBIT HOLE ↗" : "OPEN THIS RABBIT HOLE ON WHITERABBT.COM ↗", x + 18, y, w - 36, 46, { href: R.hole.url, label: "Open this rabbit hole on White Rabbit" }); y += 56;
@@ -972,7 +1028,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     if (ui.copied) { T(ui.copied, x + 18, y + 16, { size: 19, color: COL.found }); y += 26; }
     y = drawYourTable(x + 18, y + 12, w - 36, true) + 10;
     X.strokeStyle = COL.line; X.lineWidth = 1.5; X.strokeRect(x + .75, y0 + .75, w - 1.5, y - y0 - 1.5);
-    if (ST.log.length && !narrow) y = drawLogList(ST.log.slice().reverse(), x, y + 18, w, "YOUR TAPE");
+    if (ST.log.length && !narrow) y = drawLogList(ST.log.slice().reverse(), x, y + 18, w, "YOUR GUESSES");
     return y;
   }
   /* --- today's score and the leaderboard: tables, on their own screen --- */
@@ -1016,9 +1072,9 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
         s !== null ? s + (st.ejected ? "*" : "") : live ? st.strokes + "…" : "–", { t: sc === null ? "–" : golf(sc), color: scoreColor(sc) }], color: i === RI && ui.view === "play" ? COL.white : st && st.done ? COL.osd : COL.dim };
     });
     rows.push({ strong: true, hl: "rgba(230,220,174,.08)", color: COL.ink, cells: ["TODAY", String(t.all ? t.allPar : t.par), t.done ? String(t.strokes) : "–", { t: golf(t.score), color: t.done ? scoreColor(t.score) : COL.faint }] });
-    y = drawTable(x, y, w, [{ label: "TAPE", f: .46 }, { label: "PAR", f: .15, align: "center", term: true }, { label: "STROKES", f: .21, align: "center", term: true }, { label: "SCORE", f: .18, align: "center" }], rows, { size: compact ? 16 : 17 });
+    y = drawTable(x, y, w, [{ label: "DISK", f: .46 }, { label: "PAR", f: .15, align: "center", term: true }, { label: "STROKES", f: .21, align: "center", term: true }, { label: "SCORE", f: .18, align: "center" }], rows, { size: compact ? 16 : 17 });
     var notes = [];
-    if (!t.all) notes.push(t.done + " of " + ROUNDS.length + " tapes finished; TODAY adds up the finished ones.");
+    if (!t.all) notes.push(t.done + " of " + ROUNDS.length + " disks finished; TODAY adds up the finished ones.");
     if (STATES.some(function (st) { return st.ejected; })) notes.push("* ejected: counts as par + " + (EJECT + 1) + ".");
     if (notes.length) y += para(notes.join(" "), x, y + 4, w, { size: 14, fam: FF.mono, pre: "500", color: COL.faint, lh: 19, terms: true });
     return y + 6;
@@ -1062,7 +1118,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     if (BOARD.state === "setup") return y + para("The leaderboard isn't switched on for this site yet.", x, y, w, { size: 16, fam: FF.mono, pre: "500", color: COL.dim, lh: 23 });
     if (BOARD.state === "error") { y += para("NO SIGNAL: the leaderboard didn't answer.", x, y, w, { size: 17, fam: FF.vcr, color: COL.dim, lh: 21 }) + 8; button("board-retry", "TRY AGAIN", x, y, Math.min(w, 200), 42, { size: 20, onClick: fetchBoard, label: "Load the leaderboard again" }); return y + 52; }
     var list = BOARD.entries, top = list.slice(0, 20), me = BOARD.you;
-    if (!list.length) y += para("Nobody has posted today yet. " + (t.all ? "Be the first." : "Finish all three tapes and be the first."), x, y, w, { size: 16, fam: FF.mono, pre: "500", color: COL.dim, lh: 23 }) + 10;
+    if (!list.length) y += para("Nobody has posted today yet. " + (t.all ? "Be the first." : "Finish all three disks and be the first."), x, y, w, { size: 16, fam: FF.mono, pre: "500", color: COL.dim, lh: 23 }) + 10;
     else {
       var rows = top.map(function (e) { return { hl: e.mine ? "rgba(230,220,174,.14)" : "", color: e.mine ? COL.ink : COL.osd, cells: [String(e.rank), e.name + (e.mine ? " (YOU)" : ""), String(e.strokes), { t: golf(e.score), color: e.mine ? COL.ink : scoreColor(e.score) }] }; });
       if (me && me.rank > 20) { rows.push({ color: COL.faint, cells: ["…", "", "", ""] }); rows.push({ hl: "rgba(230,220,174,.14)", color: COL.ink, cells: [String(me.rank), me.name + " (YOU)", String(me.strokes), golf(me.score)] }); }
@@ -1070,7 +1126,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       y += para(list.length + (list.length === 1 ? " PLAYER" : " PLAYERS") + " TODAY" + (me ? " · YOU'RE #" + me.rank : ""), x, y, w, { size: 16, fam: FF.vcr, color: COL.faint, lh: 19 }) + 10;
     }
     // posting: a name, then your finished day goes up (posting again updates it)
-    if (!t.all) return y + para("Finish all three tapes to post your score.", x, y, w, { size: 16, fam: FF.mono, pre: "500", color: COL.dim, lh: 23 });
+    if (!t.all) return y + para("Finish all three disks to post your score.", x, y, w, { size: 16, fam: FF.mono, pre: "500", color: COL.dim, lh: 23 });
     var posted = me && !ui.editName;
     if (posted) {
       y += para("POSTED AS " + me.name.toUpperCase(), x, y, w, { size: 18, fam: FF.vcr, color: COL.found, lh: 21 }) + 6;
@@ -1092,7 +1148,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   function drawScores() {
     var W = ui.W, H = ui.H, narrow = W < 760, mx = W * (narrow ? .09 : .085), my = H * (narrow ? .065 : .08) + ui.safeT;
     var hy = my + 18, hs = narrow ? 21 : 24, t = dayTotals();
-    var bw = T("◀ TAPES", mx, hy, { size: hs }); hit("back", mx - 6, hy - hs, bw + 12, hs + 10, "button", { label: "Back to the tapes", onClick: backToShelf });
+    var bw = T("◀ DISKS", mx, hy, { size: hs }); hit("back", mx - 6, hy - hs, bw + 12, hs + 10, "button", { label: "Back to the disks", onClick: backToShelf });
     var day = new Date(DATA.date + "T12:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" }).toUpperCase();
     var ht = (narrow ? "" : NAME.toUpperCase() + " #" + (DATA.day || 1) + " · ") + rules().name + " · " + day;
     var htw = W_(ht, hs, FF.vcr); T(ht, W - mx - htw, hy, { size: hs, color: COL.white });
@@ -1101,14 +1157,14 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       y = drawSection("TODAY'S SCORE · " + rules().name + " MODE", x, y, w);
       var big = t.done ? golf(t.score) : "–";
       var bigW = T(big, x, y + 56, { size: 70, color: t.done ? scoreColor(t.score) : COL.faint, glow: 6 });
-      var line = t.done ? t.strokes + " STROKES · PAR " + (t.all ? t.allPar : t.par) + (t.all ? " · ALL " + ROUNDS.length + " TAPES" : " · " + t.done + " OF " + ROUNDS.length + " TAPES") : "NO TAPES FINISHED YET";
+      var line = t.done ? t.strokes + " STROKES · PAR " + (t.all ? t.allPar : t.par) + (t.all ? " · ALL " + ROUNDS.length + " DISKS" : " · " + t.done + " OF " + ROUNDS.length + " DISKS") : "NO DISKS FINISHED YET";
       para(line, x + bigW + 18, y + 26, w - bigW - 18, { size: 19, fam: FF.vcr, color: COL.dim, lh: 22, terms: true });
       y += 80;
       y = drawYourTable(x, y, w, false) + 12;
       var half = (w - 10) / 2;
       button("scores-share", "SHARE TODAY", x, y, half, 46, { primary: t.all, size: 21, onClick: share, label: "Copy today's result" });
       var nx = firstOpen(), more = STATES.some(function (st) { return !st.done; });
-      button("scores-next", more ? "PLAY TAPE " + (nx + 1) + " ▶" : "◀ TAPES", x + half + 10, y, half, 46, { size: 21, primary: more, onClick: more ? function () { focus = nx; if (GL) GL.focus(nx); openRound(nx); } : backToShelf, label: more ? "Play tape " + (nx + 1) : "Back to the tapes" });
+      button("scores-next", more ? "PLAY DISK " + (nx + 1) + " ▶" : "◀ DISKS", x + half + 10, y, half, 46, { size: 21, primary: more, onClick: more ? function () { focus = nx; if (GL) GL.focus(nx); openRound(nx); } : backToShelf, label: more ? "Play disk " + (nx + 1) : "Back to the disks" });
       y += 54;
       if (ui.copied) { T(ui.copied, x, y + 16, { size: 19, color: COL.found }); y += 26; }
       return y;
@@ -1324,35 +1380,59 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     post.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), mat));
 
     var groups = [];
+    // a dim room with a couple of bright softboxes, for metal to reflect
+    function roomEnv() {
+      var c = document.createElement("canvas"); c.width = 512; c.height = 256; var x = c.getContext("2d");
+      var g = x.createLinearGradient(0, 0, 0, 256); g.addColorStop(0, "#e2e5ea"); g.addColorStop(.38, "#9ea3ab"); g.addColorStop(.55, "#565a62"); g.addColorStop(1, "#2a2c31"); x.fillStyle = g; x.fillRect(0, 0, 512, 256);
+      x.fillStyle = "#ffffff"; x.fillRect(40, 30, 170, 64); x.fillRect(300, 20, 190, 50); x.fillStyle = "rgba(255,246,230,.9)"; x.fillRect(200, 100, 120, 30);
+      x.fillStyle = "rgba(20,20,24,.85)"; x.fillRect(0, 150, 512, 14); // a dark band, so the brushed metal shows a crisp reflection line
+      // behind the viewer (what a disk facing you reflects): a bright window over a dark sill, for a highlight across the shutter
+      var wg = x.createLinearGradient(0, 70, 0, 160); wg.addColorStop(0, "#ffffff"); wg.addColorStop(.55, "#f2f4f7"); wg.addColorStop(.56, "#3b3e45"); wg.addColorStop(1, "#1d1f23");
+      x.fillStyle = wg; x.fillRect(330, 70, 110, 90);
+      var tex = new THREE.CanvasTexture(c); tex.mapping = THREE.EquirectangularReflectionMapping; tex.encoding = THREE.sRGBEncoding;
+      var pm = new THREE.PMREMGenerator(renderer), out = pm.fromEquirectangular(tex).texture; pm.dispose(); tex.dispose();
+      return out;
+    }
     function addTapes() {
-    var geo = new THREE.BoxGeometry(2.0, 3.5, 0.36);
-    var dark = new THREE.MeshLambertMaterial({ color: 0x111112 });
-    var casTex = new THREE.CanvasTexture(drawCassette()); casTex.encoding = THREE.sRGBEncoding;
-    var casGeo = new THREE.BoxGeometry(1.84, 0.92, 0.28);
-    groups = TAPES.map(function (t, i) {
-      var tex = new THREE.CanvasTexture(drawCover(t, i)); tex.encoding = THREE.sRGBEncoding; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
-      var sideTex = new THREE.CanvasTexture(drawSide(t)); sideTex.encoding = THREE.sRGBEncoding;
-      var front = new THREE.MeshLambertMaterial({ map: tex }), side = new THREE.MeshLambertMaterial({ map: sideTex });
-      var g = new THREE.Group(), sleeve = new THREE.Mesh(geo, [side, side, dark, dark, front, dark]); g.add(sleeve);
-      var cas = new THREE.Mesh(casGeo, [dark, dark, dark, dark, new THREE.MeshLambertMaterial({ map: casTex }), dark]); cas.position.set(0, 1.25, -0.01); g.add(cas);
-      sleeve.userData.i = i; g.userData = { cas: cas, mats: [front, side], out: 0 };
-      scene.add(g); return g;
-    });
+      // a floppy: the plastic body (one corner cut), its printed face, and a metal shutter that slides open on the disk in front
+      var Wd = DISK.w, Hd = DISK.h, cut = DISK.cut, shape = new THREE.Shape();
+      shape.moveTo(-Wd / 2, -Hd / 2); shape.lineTo(Wd / 2, -Hd / 2); shape.lineTo(Wd / 2, Hd / 2 - cut); shape.lineTo(Wd / 2 - cut, Hd / 2); shape.lineTo(-Wd / 2, Hd / 2); shape.closePath();
+      var bodyGeo = new THREE.ExtrudeGeometry(shape, { depth: DISK.d, bevelEnabled: true, bevelThickness: 0.012, bevelSize: 0.012, bevelSegments: 1 });
+      bodyGeo.translate(0, 0, -DISK.d / 2);
+      var faceGeo = new THREE.ShapeGeometry(shape), pos = faceGeo.attributes.position, uv = faceGeo.attributes.uv;
+      for (var k = 0; k < pos.count; k++) uv.setXY(k, (pos.getX(k) + Wd / 2) / Wd, (pos.getY(k) + Hd / 2) / Hd);
+      uv.needsUpdate = true;
+      var shutTex = new THREE.CanvasTexture(drawShutter()); shutTex.encoding = THREE.sRGBEncoding; shutTex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+      var env = roomEnv(), shutGeo = new THREE.BoxGeometry(1.62, 1.02, 0.025);
+      var metalSide = new THREE.MeshStandardMaterial({ color: 0xd4d7dc, metalness: 1, roughness: 0.25, envMap: env, envMapIntensity: 1.6 });
+      groups = TAPES.map(function (t, i) {
+        var tex = new THREE.CanvasTexture(drawDiskFace(t, i, false)); tex.encoding = THREE.sRGBEncoding; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+        var plastic = new THREE.MeshLambertMaterial({ color: new THREE.Color(plasticOf(t)).convertSRGBToLinear() });
+        var faceMat = new THREE.MeshLambertMaterial({ map: tex }), shutMat = new THREE.MeshStandardMaterial({ map: shutTex, metalness: 1, roughness: 0.22, envMap: env, envMapIntensity: 1.6 });
+        var g = new THREE.Group(), body = new THREE.Mesh(bodyGeo, plastic); g.add(body);
+        var face = new THREE.Mesh(faceGeo, faceMat); face.position.z = DISK.d / 2 + 0.014; g.add(face);
+        var shutter = new THREE.Mesh(shutGeo, [metalSide, metalSide, metalSide, metalSide, shutMat, metalSide]);
+        shutter.position.set(0, Hd / 2 - 0.51, DISK.d / 2 + 0.026); g.add(shutter);
+        body.userData.i = i; face.userData.i = i; shutter.userData.i = i;
+        g.userData = { shutter: shutter, mats: [{ m: faceMat, base: new THREE.Color(1, 1, 1) }, { m: plastic, base: plastic.color.clone() }, { m: shutMat, base: new THREE.Color(1, 1, 1) }], out: 0 };
+        scene.add(g); return g;
+      });
     }
     var st = { f: focus, target: focus, drag: null, insert: 0, inserting: false, show: true, t0: performance.now() };
     function layout() {
       groups.forEach(function (g, i) {
-        // tapes ride a wheel: around a vertical cylinder (they turn away and show their spines) and down an arc (they tilt and drop)
-        var d = i - st.f, ad = Math.abs(d), a = Math.sign(d) * Math.min(ad, 2.4) * 0.46, Rc = 5.4;
+        // disks ride a wheel: around a vertical cylinder (they turn away) and down an arc (they tilt and drop)
+        var d = i - st.f, ad = Math.abs(d), a = Math.sign(d) * Math.min(ad, 2.4) * 0.6, Rc = 5.6;
         g.visible = ad < 2.45;
         g.position.set(Rc * Math.sin(a) * 1.08, -(1 - Math.cos(a)) * 4.2, Rc * Math.cos(a) - Rc);
         g.rotation.set(0.05, -a * 0.95, -a * 0.42);
         var isF = Math.round(st.f) === i && ad < 0.5;
         g.userData.out += ((isF ? 1 : 0) - g.userData.out) * (reduce ? 1 : 0.12);
-        g.userData.cas.position.y = 1.25 + g.userData.out * 0.46;
+        g.userData.shutter.position.x = g.userData.out * 0.5; // the disk in front opens its shutter
         var lum = Math.max(0.2, 1 - Math.min(ad, 2.4) * 0.34);
-        g.userData.mats.forEach(function (m) { m.color.setScalar(lum); });
-        if (i === st.insertIdx && st.inserting) { g.position.z += st.insert * 7; g.position.y += st.insert * 0.2; g.rotation.x -= st.insert * 0.25; }
+        g.userData.mats.forEach(function (o) { o.m.color.copy(o.base).multiplyScalar(lum); });
+        // going in: it tips back and slides forward and down, like into a drive
+        if (i === st.insertIdx && st.inserting) { var e = st.insert * st.insert; g.position.z += e * 6; g.position.y -= e * 1.4; g.rotation.x -= e * 1.15; }
       });
     }
     function size() {
@@ -1367,7 +1447,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       else { mat.uniforms.uGlass.value.set(0.93, 0.917); mat.uniforms.uBow.value.set(0.02, 0.028); }
       camera.aspect = w / h;
       var tanh = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2));
-      var zW = (2.0 / 0.5) / (2 * tanh * camera.aspect), zH = (3.5 / 0.43) / (2 * tanh);
+      var zW = (DISK.w / 0.56) / (2 * tanh * camera.aspect), zH = (DISK.h / 0.42) / (2 * tanh);
       var z = Math.max(zW, zH), cy = 0.01 * 2 * z * tanh;
       camera.position.set(0, cy, z); camera.lookAt(0, cy, 0); camera.updateProjectionMatrix();
     }
@@ -1375,7 +1455,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     function pick(clientX, clientY) {
       var rct = canvas.getBoundingClientRect(), u = (clientX - rct.left) / rct.width * 2 - 1, v = (clientY - rct.top) / rct.height * 2 - 1, b = bendC(u, v);
       ray.setFromCamera({ x: b[0], y: -b[1] }, camera);
-      var hits = ray.intersectObjects(groups.map(function (g) { return g.children[0]; }));
+      var hits = ray.intersectObjects(groups.reduce(function (a, g) { return a.concat(g.children); }, []));
       return hits.length ? hits[0].object.userData.i : -1;
     }
     size();
@@ -1479,7 +1559,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   function doTrack() {
     if (ui.busy || ST.done) return;
     var cur = here(ST);
-    if (ST.tracked[cur]) { var a = ST.tracked[cur]; return after({ free: "TRACKING again, free: " + replyLine(a) }); }
+    if (ST.tracked[cur]) { var a = ST.tracked[cur]; return after({ free: "Hint again, free: " + replyLine(a) }); }
     var st = ST;
     ui.busy = { track: true, t0: Date.now() }; ui.free = ""; ui.dirty = true; kick();
     track(st).then(function (r) {
@@ -1529,7 +1609,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       return (i + 1) + ". " + r.start + " ··· " + r.target + "\n" + (sq || "·") + (st.done ? "  " + (st.solved ? st.strokes + " (" + golf(score(st, r)) + ")" : "ejected (" + golf(score(st, r)) + ")") : "");
     });
     var dt = dayTotals();
-    var text = NAME + " #" + (DATA.day || 1) + " · " + MODES[MODE].name.charAt(0) + MODES[MODE].name.slice(1).toLowerCase() + " mode · " + day + "\n" + (dt.done ? "Today: " + dt.strokes + " strokes, par " + dt.par + " (" + golf(dt.score) + ")" + (dt.all ? "" : ", " + dt.done + " of " + ROUNDS.length + " tapes") : "Today: no tapes finished yet") + "\n" + rows.join("\n") + "\n" + SHARE_URL;
+    var text = NAME + " #" + (DATA.day || 1) + " · " + MODES[MODE].name.charAt(0) + MODES[MODE].name.slice(1).toLowerCase() + " mode · " + day + "\n" + (dt.done ? "Today: " + dt.strokes + " strokes, par " + dt.par + " (" + golf(dt.score) + ")" + (dt.all ? "" : ", " + dt.done + " of " + ROUNDS.length + " disks") : "Today: no disks finished yet") + "\n" + rows.join("\n") + "\n" + SHARE_URL;
     var ok = function () { ui.copied = "COPIED. PASTE IT IN A CHAT."; ui.dirty = true; kick(); };
     var fail = function () {
       var ta = document.createElement("textarea"); ta.className = "sharebox"; ta.value = text; ta.readOnly = true; $("screen").appendChild(ta); ta.focus(); ta.select();
@@ -1596,7 +1676,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   /* ================= go ================= */
   var fontsReady = (document.fonts && document.fonts.load) ? Promise.all([
     document.fonts.load('400 20px "Handjet"'), document.fonts.load('500 20px "Handjet"'), document.fonts.load('600 20px "Handjet"'),
-    document.fonts.load('700 20px "Handjet"'), document.fonts.load('800 20px "Handjet"'), document.fonts.load('italic 400 20px "Handjet"')
+    document.fonts.load('700 20px "Handjet"'), document.fonts.load('800 20px "Handjet"'), document.fonts.load('italic 400 20px "Handjet"'), document.fonts.load('700 40px "Caveat"')
   ]).catch(function () {}) : Promise.resolve();
   ui.view = "loading";
   try { GL = initGL(); } catch (e) { GL = null; }

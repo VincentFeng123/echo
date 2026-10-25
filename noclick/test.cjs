@@ -1,6 +1,6 @@
-// noclick/test.cjs: plays today's No Clicking tapes end to end in headless Chromium, on a 390px phone and a desktop,
+// noclick/test.cjs: plays today's No Clicking disks end to end in headless Chromium, on a 390px phone and a desktop,
 // against live Wikipedia and the AI referee (/api/judge), in Medium mode, then checks Easy and Hard. Tape 1 runs TOO BROAD (a year, "movies", a country), WHICH ONE,
-// NOT FOUND, TRACKING, a name found through search ("werthers candy"), MOVE and REWIND, then finishes; tape 2 finishes on the rabbit's own route;
+// NOT FOUND, HINT, a name found through search ("werthers candy"), MOVE and UNDO, then finishes; tape 2 finishes on the rabbit's own route;
 // tape 3 takes STATIC until it ejects.
 // It also checks the end screen's links, share, today's score and the leaderboard (posting as "Test bot", removed after),
 // reload, ?reset and the ARCHIVE tab, and fails on console errors or
@@ -44,7 +44,7 @@ async function run(name, vp, mobile, browser, errors) {
   await shot('1-shelf'); await overflow('shelf');
 
   // tape 1: every reply, then finish on a chain that works
-  await btn('Play tape 1').click({ force: true }); await waitView('play'); await page.waitForTimeout(400);
+  await btn('Play disk 1').click({ force: true }); await waitView('play'); await page.waitForTimeout(400);
   // first time on this device: how to play, as a box with an X; its underlined words explain themselves
   const xBtn = page.locator('#hits [aria-label="Close how to play"]');
   await xBtn.waitFor({ state: 'visible', timeout: 15000 }).catch(() => errors.push(`${name}: how-to-play box didn't show`));
@@ -58,8 +58,8 @@ async function run(name, vp, mobile, browser, errors) {
   await expect(0, CHECKS[0].broad, 'broad');
   await expect(0, 'Mercury', 'dym');
   await expect(0, 'Zqxjv wkqp', 'dym'); // no such page: free
-  await btn('Tracking').click({ force: true }); await settle();
-  if (await last(0) !== 'track') errors.push(`${name}: TRACKING didn't take`);
+  await btn('Hint').click({ force: true }); await settle();
+  if (await last(0) !== 'track') errors.push(`${name}: HINT didn't take`);
   await shot('3-tape1-tracking');
   // umbrella topics are too broad, whatever they're typed as ("movies" is Film)
   await expect(0, 'movies', 'broad');
@@ -71,8 +71,8 @@ async function run(name, vp, mobile, browser, errors) {
   await type('werthers candy');
   const s1 = (await state())[0];
   if (s1.lastTo !== "Werther's Original") errors.push(`${name}: "werthers candy" read as ${s1.lastTo}`);
-  for (let i = 0; i < s1.path.length - 1; i++) { await btn('Rewind').click({ force: true }); await page.waitForTimeout(200); }
-  if ((await state())[0].path.length !== 1) errors.push(`${name}: REWIND didn't take`);
+  for (let i = 0; i < s1.path.length - 1; i++) { await btn('Undo').click({ force: true }); await page.waitForTimeout(200); }
+  if ((await state())[0].path.length !== 1) errors.push(`${name}: UNDO didn't take`);
   for (const g of CHECKS[0].route) await expect(0, g.toLowerCase(), 'move');
   let s = (await state())[0];
   if (!s.solved) errors.push(`${name}: tape 1 not solved: ${JSON.stringify(s)}`);
@@ -83,7 +83,7 @@ async function run(name, vp, mobile, browser, errors) {
   if (!/whiterabbt\.com\/daily/.test(await page.locator('#hits a[aria-label^="More rabbit holes"]').getAttribute('href'))) errors.push(`${name}: more-holes link`);
 
   // tape 2: the rabbit's own route
-  await btn('Next tape').click({ force: true }); await page.waitForTimeout(400);
+  await btn('Next disk').click({ force: true }); await page.waitForTimeout(400);
   for (const g of CHECKS[1].route) await expect(1, g, 'move');
   s = (await state())[1];
   if (!s.solved || s.strokes !== TAPES[1].par) errors.push(`${name}: tape 2 ${JSON.stringify(s)}`);
@@ -91,7 +91,7 @@ async function run(name, vp, mobile, browser, errors) {
   await shot('6-tape2-end');
 
   // tape 3: run out of strokes and eject
-  await btn('Next tape').click({ force: true }); await page.waitForTimeout(400);
+  await btn('Next disk').click({ force: true }); await page.waitForTimeout(400);
   await shot('7-tape3-start'); await overflow('tape 3');
   // real pages with nothing to do with the start (Wikipedia doesn't tie them, and neither does the referee)
   const far = ['Platypus', 'Saturn V', 'Sourdough', 'Tango', 'Velociraptor', 'Tuba', 'Origami', 'Mount Kilimanjaro', 'Sumo', 'Okapi', 'Paella', 'Narwhal', 'Didgeridoo', 'Haiku', 'Kimchi', 'Flamenco'];
@@ -129,11 +129,11 @@ async function run(name, vp, mobile, browser, errors) {
   // modes: Easy lets a country through, Hard charges a stroke for it; each mode keeps its own progress
   const playIn = async (mode, g) => {
     await btn(mode[0].toUpperCase() + mode.slice(1) + ' mode').click({ force: true }); await page.waitForTimeout(500);
-    await btn('Play tape 1').click({ force: true }); await waitView('play'); await page.waitForTimeout(800);
+    await btn('Play disk 1').click({ force: true }); await waitView('play'); await page.waitForTimeout(800);
     const x = btn('Close how to play'); if (await x.isVisible().catch(() => false)) { await x.click({ force: true }); await page.waitForTimeout(500); }
     const before = (await state())[0].log.length; await type(g);
     const s = (await state())[0];
-    await btn('Back to the tapes').click({ force: true }); await waitView('shelf'); await page.waitForTimeout(400);
+    await btn('Back to the disks').click({ force: true }); await waitView('shelf'); await page.waitForTimeout(400);
     return { kind: s.log.length > before ? s.log[s.log.length - 1] : 'free', strokes: s.strokes };
   };
   const easy = await playIn('easy', 'Germany');
