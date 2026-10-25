@@ -5,11 +5,14 @@
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Handjet:wght@100..900&display=swap">
 <style>
 /* One curved CRT fills the viewport. Inside it is a detective's office at night, seen from the chair behind the desk:
-   the pointer is free to aim (no pointer lock, so no browser banner); pushing it into the edge of the glass turns your
-   head, and a drag (mouse or finger) looks around; you pick things up off the desk. Everything you see, the room and
-   the on-screen display, is drawn into the tube and bent by it. Invisible real controls sit where the bent picture shows them: plain ones for the on-screen display, and
+   seated, a click on the room locks the mouse (pointer lock) and it turns your head like any first-person game, with a
+   dot in the middle of the glass to aim; Esc frees it, and anything that wants a pointer (a thing in your hand, a
+   drawer, the terminal) frees it by itself and locks it again after. A finger drags the view. Where pointer lock is
+   refused, the old free pointer is the fallback: pushing it into the edge of the glass turns your head. Everything you
+   see, the room and the on-screen display, is drawn into the tube and bent by it. Invisible real controls sit where the bent picture shows them: plain ones for the on-screen display, and
    "mirrors" (class m) for things in the 3D room, which keyboard and tests can use while the pointer goes straight
-   through to the room. The mouse pointer is our own (#cur): a dot, a ring over what can be used, and its name. */
+   through to the room. #cur is the dot in the middle while the mouse is locked (a ring and a name over what can be
+   used); with the mouse free it is just that name, beside the system pointer; in the fallback it is the pointer. */
 :root { --room: #030303; --osd: #d6d3cb; --ink: #e6dcae; --px: "Handjet", ui-monospace, monospace; color-scheme: dark; }
 html, body { height: 100%; }
 [hidden] { display: none !important; }
@@ -18,7 +21,8 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
 .screen { position: absolute; inset: 0; overflow: hidden; background: #000; }
 .probe { position: absolute; visibility: hidden; padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
 #gl, #flat { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
-/* our own pointer is drawn over the TV; !important beats the inline cursor the room sets on hover */
+/* in the fallback (no pointer lock) our own pointer is drawn over the TV; !important beats the inline cursor the room
+   sets on hover */
 body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
 #cur { position: fixed; left: 0; top: 0; z-index: 9; width: 0; height: 0; pointer-events: none; will-change: transform; }
 #cur[hidden] { display: none !important; }
@@ -31,6 +35,9 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
 #cur.ui .dot { transform: scale(1.25); }
 #curlab { position: absolute; left: 0; top: 20px; transform: translateX(-50%); white-space: nowrap; font: 600 17px/1 var(--px); letter-spacing: .03em; color: #f4f2ed; background: rgba(6,6,6,.74); padding: 4px 9px 3px; text-shadow: 0 0 4px rgba(244,242,237,.45); opacity: 0; transition: opacity .16s; }
 #cur.on #curlab.has { opacity: 1; }
+/* the mouse free (not locked): the system's own pointer, and only the name of what it is on, just under it */
+#cur.sys .dot, #cur.sys .ring { display: none; }
+#cur.sys #curlab { left: 14px; top: 24px; transform: none; }
 #glass { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 2; pointer-events: none; display: block; }
 #hits { position: absolute; inset: 0; z-index: 3; pointer-events: none; overflow: hidden; }
 #hits > * { position: absolute; pointer-events: auto; margin: 0; padding: 0; border: 0; background: transparent; color: transparent; opacity: 0; cursor: pointer; font-size: 16px; overflow: hidden; }
@@ -2691,17 +2698,33 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
   var DEG = Math.PI / 180;
   var VIEW = { name: "desk", drawer: null };
   var LOOK = { yaw: 0, pitch: -27 * DEG, yawT: 0, pitchT: -27 * DEG, lean: 0, leanT: 0, keys: {}, YAW: 100 * DEG, PMIN: -65 * DEG, PMAX: 30 * DEG };
-  /* the mouse: a free pointer that aims, and edges that turn your head. Nothing is locked (a locked pointer makes every
-     browser put up its own banner), so the pointer goes where the hand goes and the room holds still under it: the inner
-     part of the glass never turns the head, so whatever you can see you can point at and click. Push the pointer into
-     the band along an edge and the head turns that way, gently at the band's inner side and faster toward the very edge.
-     SENS holds the band widths (as a share of the glass, both sides together), the top speeds in degrees a second, how
-     steeply they ramp, and a moment's grace before a pass through the band turns anything (tests read it as
-     __desk.sens). Over a button on the display, in the corners where the case title, NOTES, REPORT and the tabs sit,
-     while a button is held, or once the pointer has left the window, nothing turns. A drag anywhere in the room looks
-     round freely (the room follows the hand, as with a finger), and a trackpad's sideways swipe turns the head too. */
-  // (pad: how far, in px, the pointer may stray off a thing it is on before its name goes; see stillNear)
-  var SENS = { band: .2, bandY: .16, yaw: 150, pitch: 90, curve: 1.6, intent: .2, ramp: .16, hold: .55, smooth: .06, drag: 1.3, swipe: .0024, pad: 8 };
+  /* the mouse, first person: seated at the desk, a click on the room locks the pointer and from then on the mouse turns
+     the head directly (SENS.look degrees for each px it moves, a whole sweep of the neck in one easy stroke of the
+     hand), eased by SENS.smooth; a dot in the middle of the glass aims, and a click uses what it is on. Esc frees the
+     mouse (the browser does that itself). Freed, it is the system's own pointer over a still room: it clicks things
+     where they are, and a click on nothing locks it again. A thing taken up, a drawer, the terminal, the report's
+     picker, the explanation at the end: each wants a pointer, so the lock lets go by itself, and comes back once you
+     are back at the desk with nothing in hand, if it was locked before (see "pointer lock" below).
+     The fallback, when the browser refuses the lock: the old free pointer that aims, and edges that turn your head.
+     The pointer goes where the hand goes and the room holds still under it: the inner part of the glass never turns
+     the head. Push the pointer into the band along an edge and the head turns that way, gently at the band's inner
+     side and faster toward the very edge. SENS holds the band widths (as a share of the glass, both sides together),
+     the top speeds in degrees a second, how steeply they ramp, and a moment's grace before a pass through the band
+     turns anything (tests read it as __desk.sens). Over a button on the display, in the corners where the case title,
+     NOTES, REPORT and the tabs sit, while a button is held, or once the pointer has left the window, nothing turns. A
+     drag anywhere in the room looks round there too. A trackpad's sideways swipe turns the head in every mode. */
+  // (look: degrees of turn for each px the locked mouse moves; lookMax: px in one move beyond which a move is taken as
+  // a glitch and cut down to that; pad: how far, in px, the pointer may stray off a thing it is on before its name
+  // goes; see stillNear)
+  var SENS = { look: .3, lookMax: 240, band: .2, bandY: .16, yaw: 150, pitch: 90, curve: 1.6, intent: .2, ramp: .16, hold: .55, smooth: .06, drag: 1.3, swipe: .0024, pad: 8 };
+  /* pointer lock. on: locked now; follow: the fallback is in use (no lock here: the old free pointer with its edges);
+     relock: the page freed the mouse itself (for a thing in hand, a drawer, the terminal), so it locks again once you
+     are back at the desk; exiting: the page has asked to free it; auto: the request now pending was the page's own
+     (relocking), not a click; offAt: when it last came free; sim: tests (headless browsers can't lock), see
+     __desk.simulateLock */
+  var PLOCK = { on: false, follow: false, relock: false, exiting: false, auto: false, offAt: 0, sim: false, lx: null, ly: null };
+  var CAN_LOCK = !!(window.HTMLCanvasElement && typeof HTMLCanvasElement.prototype.requestPointerLock === "function" && typeof document.exitPointerLock === "function");
+  PLOCK.follow = !CAN_LOCK;
   // armed: the pointer has moved since the view last changed by itself (sitting down, putting a thing back, shutting a
   // drawer), so a pointer left resting at an edge (on PUT BACK, say) doesn't swing the head the moment you are back
   var MLOOK = { seen: false, u: 0, v: 0, cx: 0, cy: 0, over: false, onUI: false, inside: false, down: false, drag: false, px: null, py: null, inBand: 0, push: 0, armed: false };
@@ -2717,15 +2740,19 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
     if (u > .8 && (v - mid) * d > 0) d *= Math.pow(clamp(1 - (u - .8) / .2, 0, 1), 2);
     return clamp(v + d, lo, hi);
   }
-  // seated at the desk with nothing in hand: the mouse may turn the head (by the edges or a drag)
-  function mouseLooks() { return MLOOK.seen && !isTouch() && ui.view === "play" && SIT.done && VIEW.name === "desk" && !HELD && !ui.picker && !REVEAL.on && !camWalking(); }
+  // seated at the desk with nothing in hand, nothing up that wants a pointer: the mouse may be locked to look round
+  function deskFree() { return ui.view === "play" && SIT.done && VIEW.name === "desk" && !HELD && !ui.picker && !REVEAL.on && !PRINT.active && !GLX.failed && !$("sharebox"); }
+  // ... and the head may be turned by it now (not while the walk to the chair is still going)
+  function lookFree() { return deskFree() && !camWalking(); }
+  // the fallback's free pointer may turn the head (by the edges or a drag)
+  function mouseLooks() { return PLOCK.follow && MLOOK.seen && !isTouch() && lookFree(); }
   // where the display's own controls are drawn (the glass is bent, so the pointer is mapped onto the flat display first)
   function displayXY(cx, cy) { var rc = ui.rect || (ui.rect = $("screen").getBoundingClientRect()), b = bendC((cx - rc.left) / Math.max(1, rc.width) * 2 - 1, (cy - rc.top) / Math.max(1, rc.height) * 2 - 1); return { x: (b[0] + 1) / 2 * ui.W, y: (b[1] + 1) / 2 * ui.H }; }
   function inZone(cx, cy) { var p = displayXY(cx, cy); return (ui.zones || []).some(function (z) { return p.x > z.x - 26 && p.x < z.x + z.w + 26 && p.y > z.y - 26 && p.y < z.y + z.h + 26; }); }
-  /* holding Q (or Tab, while none of the glass's controls has the keyboard) keeps the view still: the edges and a drag
-     turn nothing, so something near an edge can be aimed at and clicked. A quick tap of Tab still steps through the
-     controls (see the keydown handler) */
-  var HOLDV = { q: false, tab: false, tabAt: 0, tabMoved: false, told: false };
+  /* in the fallback, holding Q (or Tab, while none of the glass's controls has the keyboard) keeps the view still: the
+     edges and a drag turn nothing, so something near an edge can be aimed at and clicked. A quick tap of Tab still
+     steps through the controls (see the keydown handler) */
+  var HOLDV = { q: false, tab: false, tabAt: 0, tabMoved: false };
   function viewHeld() { return HOLDV.q || HOLDV.tab; }
   // a thing on the desk (a file, the notebook, the report, the phone, the recorder): aiming at one never turns the head,
   // even out in the edge band, because the desk is only ever in front of you and there is always room above it to turn
@@ -2796,7 +2823,7 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
     if (push) {
       MLOOK.inBand += Math.min(dt, .1);
       var ki = MLOOK.inBand <= SENS.intent ? 0 : Math.min(1, (MLOOK.inBand - SENS.intent) / Math.max(.01, SENS.ramp));
-      if (ki && !MLOOK.push) { ui.dirty = true; if (!HOLDV.told && perfNow() > HINT.until) { HOLDV.told = true; try { if (localStorage.getItem("desk:holdtip") !== "1") { localStorage.setItem("desk:holdtip", "1"); toast("HOLD Q TO KEEP THE VIEW STILL"); } } catch (e) {} } }
+      if (ki && !MLOOK.push) ui.dirty = true;
       MLOOK.push = ki; if (ki) addLook(push.yaw * dt * ki, push.pitch * dt * ki); else kick();
     }
     else { if (MLOOK.push) ui.dirty = true; MLOOK.inBand = 0; MLOOK.push = 0; }
@@ -2897,6 +2924,8 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
       // walking to the chair: round behind it, then down into it
       if (walk) { var a = CAMS.pos.clone(); CAMS.walk = true; CAMS.curve = new THREE.CatmullRomCurve3([a, a.clone().lerp(V(.42, 1.6, 1.08), .5), V(.42, 1.6, 1.08), V(-.1, 1.55, 1.12), seatPose(tmpSeat).pos.clone()]); }
     }
+    // back at the desk from a drawer or the terminal: the mouse locks again if the page freed it for them
+    if (name === "desk") relockSoon();
     ui.dirty = true; kick();
   }
   function stepCamera(dt) {
@@ -3027,6 +3056,9 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
     else { FLIGHTS.push({ th: th, t: 0, dur: .5, from: from, toHome: true, arc: .05 }); th.fly = true; sfx("paper"); }
     if (back === "printer") { go("computer"); TERM.wantFocus = true; }
     else if (back && (back !== VIEW.name || (back === "drawer" && backDrawer !== VIEW.drawer))) go(back, backDrawer);
+    // put down at the desk: the mouse locks again if it was locked when this was taken up (the click that put it back
+    // is the gesture the browser wants)
+    relockSoon();
     ui.dirty = true; kick();
   }
   function finishHome(th) {
@@ -4162,12 +4194,17 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
     var att = attentionHint(false); if (att) return att;
     var mouse = !isTouch(), early = perfNow() < HINT.until;
     if (early) ui.redrawAt = Math.min(ui.redrawAt, HINT.until + 30); // the hint goes when its time is up
+    // the mouse free (not locked) at the desk: how to lock it, whichever way you face (but the briefing first, the
+    // first time, and not at the end, where the mouse is free for the case's own buttons)
+    var free = mouse && !PLOCK.follow && !PLOCK.on && !S.done;
     // a hint about the desk only while you are looking at the desk (it used to sit under the door, pointing at nothing)
-    if (!facingDesk()) return "";
-    if (!S.cardSeen) return cardInView() ? TAP() + " THE BRIEFING WITH THE RED FLAG" : "";
+    if (!facingDesk()) return free ? LOCK_HINT : "";
+    if (!S.cardSeen) return cardInView() ? TAP() + " THE BRIEFING WITH THE RED FLAG" : free ? LOCK_HINT : "";
+    if (free) return LOCK_HINT;
     if (S.done || !early) return "";
-    return mouse ? "PUSH THE POINTER TO AN EDGE TO TURN · HOLD Q TO KEEP STILL · CLICK THINGS TO USE THEM" : "DRAG TO LOOK AROUND · TAP THINGS TO USE THEM";
+    return !mouse ? "DRAG TO LOOK AROUND · TAP THINGS TO USE THEM" : PLOCK.on ? "THE MOUSE LOOKS AROUND · CLICK WHAT THE DOT IS ON · ESC FREES THE MOUSE" : "PUSH THE POINTER TO AN EDGE TO TURN · CLICK THINGS TO USE THEM";
   }
+  var LOCK_HINT = "CLICK TO LOOK AROUND · ESC FREES THE MOUSE";
   var HINT = { until: 0, cardTold: false };
   function facingDesk() { return Math.abs(LOOK.yaw) < 42 * DEG && LOOK.pitch < 2 * DEG && LOOK.pitch > -60 * DEG; }
   function cardInView() { var th = THINGS._card; if (!th || !th.group.parent) return false; var r = screenRect(th.group); if (!r || r.w * r.h < 400) return false; var mx = r.x + r.w / 2, my = r.y + r.h / 2; return mx > ui.W * .04 && mx < ui.W * .96 && my > ui.H * .05 && my < ui.H * .97; }
@@ -4304,7 +4341,7 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
     // the other way: skip the debrief the first time, hear it again any other time
     var ol = first ? "SKIP THE DEBRIEF" : "REPLAY THE DEBRIEF", ow = W_(ol, 17) + 28, oy = y + bh2 * .28 + (nar ? 44 : 52);
     button("deb-alt", ol, W / 2 - ow / 2, oy, ow, 34, { size: 17, label: first ? "Skip debrief" : "Replay debrief", onClick: first ? skipDebrief : startDebrief, z: 2 });
-    var sub = mouse ? "POINT AND CLICK · PUSH TO AN EDGE OR DRAG TO LOOK ROUND · HOLD Q TO KEEP STILL · HEADPHONES HELP" : "DRAG TO LOOK · TAP TO USE · SOUND ON";
+    var sub = !mouse ? "DRAG TO LOOK · TAP TO USE · SOUND ON" : PLOCK.follow ? "POINT AND CLICK · PUSH TO AN EDGE OR DRAG TO LOOK ROUND · HEADPHONES HELP" : "SEATED, CLICK TO LOOK AROUND · ESC FREES THE MOUSE · HEADPHONES HELP";
     font(nar ? 18 : 20, "label"); var subN = wrapLines(X, sub, ui.W * (nar ? .84 : .7)).length;
     hintLine(sub, Math.min(H - ui.safeB - ui.insetT - 26, oy + 34 + (nar ? 40 : 46) + (subN - 1) * 22));
     if (!reduce) ui.redrawAt = Math.min(ui.redrawAt, now + 650 - now % 650 + 5);
@@ -4897,19 +4934,20 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
     W3.ray.setFromCamera(toPicture(cx, cy), W3.camera); // the ray back where the pointer is, for whoever reads it next
     return found;
   }
-  // the pointer is in the edge band, where resting turns the head (see edgePush)
+  // the pointer is in the edge band, where resting turns the head (see edgePush; the fallback only)
   function inBandAt(cx, cy) {
     if (!mouseLooks()) return false;
     var rc = ui.rect || (ui.rect = $("screen").getBoundingClientRect()), u = (cx - rc.left) / Math.max(1, rc.width) * 2 - 1, v = (cy - rc.top) / Math.max(1, rc.height) * 2 - 1;
     return Math.abs(u) > 1 - SENS.band || Math.abs(v) > 1 - SENS.bandY;
   }
 
-  /* ================= the mouse: the head follows it, and the pointer is our own =================
-     No pointer lock (a locked pointer makes the browser put up its own banner): the pointer stays free and the head
-     follows it across the glass (SENS, mouseAt). Over the TV the system pointer is hidden and ours is drawn as a DOM
-     layer, so it keeps up with the hand whatever the frame rate: a dot; a ring and a name over whatever can be used; a
-     dashed ring while you turn a thing in your hand. Over the share box, or off the page, ours goes away. On a touch
-     screen there is no pointer at all: a finger drags the view and taps things. */
+  /* ================= the mouse: locked to look, free to point =================
+     Locked (see PLOCK and "pointer lock" below), #cur is a dot fixed in the middle of the glass: what is under it gets
+     the hover light, a ring and its name, and a click uses it. Free, the system's own pointer is used (it keeps up with
+     the hand whatever the frame rate) and #cur is only the name of what it is on, just under it. In the fallback (no
+     pointer lock) the system pointer is hidden over the TV and #cur is the pointer: a dot; a ring and a name over
+     whatever can be used; a dashed ring while you turn a thing in your hand. Over the share box, or off the page, it
+     goes away. On a touch screen there is no pointer at all: a finger drags the view and taps things. */
   var CUR = { el: null, lab: null, cls: "", label: "", shown: false };
   function curEls() { if (!CUR.el) { CUR.el = $("cur"); CUR.lab = $("curlab"); } return CUR.el; }
   function placeCursor(x, y) { var el = curEls(); if (el) el.style.transform = "translate3d(" + Math.round(x) + "px," + Math.round(y) + "px,0)"; }
@@ -4926,7 +4964,9 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
     else if (HELD) { if (MLOOK.drag) cls = "grab"; else if (HOVER.region) { cls = "on"; label = regionWord(HOVER.region); } }
     else if (VIEW.name === "computer") { if (TERM.hover) { cls = "on"; label = TERM.hover.indexOf("result:") === 0 ? "PRINT IT" : "SEARCH AGAIN"; } }
     else if (HOVER.key && SIT.done) { cls = "on"; label = hoverLabel(HOVER.key); }
-    if (cls !== CUR.cls) { CUR.cls = cls; CUR.el.className = cls; }
+    // the mouse free and not the fallback's: the system pointer, so ours is only the name beside it
+    var full = cls + (!PLOCK.on && !PLOCK.follow ? (cls ? " " : "") + "sys" : "");
+    if (cls !== CUR.cls || full !== CUR.full) { CUR.cls = cls; CUR.full = full; CUR.el.className = full; }
     if (label !== CUR.label) { CUR.label = label; CUR.lab.textContent = label; CUR.lab.className = label ? "has" : ""; }
   }
   // what the pointer is over: the room, a button on the display (the head holds still over one), the share box, or
@@ -4939,7 +4979,9 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
   }
   document.addEventListener("pointermove", function (e) {
     if (e.pointerType === "touch") { if (CUR.shown) showCursor(false); return; }
-    if (!MLOOK.seen) { try { document.body.classList.add("mlook"); } catch (er) {} ui.dirty = true; }
+    // locked, the mouse only turns the head (mousemove, below); the dot stays in the middle
+    if (PLOCK.on) return;
+    if (!MLOOK.seen) { if (PLOCK.follow) { try { document.body.classList.add("mlook"); } catch (er) {} } ui.dirty = true; }
     var inside = pointerOver(e.target);
     placeCursor(e.clientX, e.clientY); showCursor(inside && ui.view === "play");
     mouseAt(e.clientX, e.clientY);
@@ -4947,7 +4989,105 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
   }, { passive: true });
   document.addEventListener("pointerdown", function (e) { if (e.pointerType === "touch") { if (CUR.shown) showCursor(false); wakeHud(); } }, { passive: true });
   // the pointer leaving the window (for the tab bar, the Dock) turns nothing: the head stays where it was
-  document.addEventListener("mouseout", function (e) { if (!e.relatedTarget) { showCursor(false); MLOOK.over = false; MLOOK.inside = false; MLOOK.down = false; } });
+  document.addEventListener("mouseout", function (e) { if (!e.relatedTarget && !PLOCK.on) { showCursor(false); MLOOK.over = false; MLOOK.inside = false; MLOOK.down = false; } });
+
+  /* ================= pointer lock =================
+     A click on the room at the desk with the mouse free asks for the lock (requestLock, from tapAt); pointerlockchange
+     says when it comes and goes (lockChanged). Locked, each mousemove's movementX/Y turns the head (lockMove) and a
+     click uses what the dot is on (lockClick). Whenever something wants a pointer (deskFree turns false: a thing in
+     hand, a drawer, the terminal, the picker, the explanation, the share box, the RELOAD message) the page frees the
+     mouse itself (freeMouse, from the frame loop, or at once after a click) and remembers it (PLOCK.relock); back at
+     the desk with nothing in hand it asks again (relockSoon, from putBack and go), inside the click or key that did it,
+     which the browser counts as the gesture it needs. Esc is the browser's own: the lock goes and stays gone until the
+     next click on the room. If the browser refuses a lock the player clicked for, the page falls back to the old free
+     pointer with its edges (lockFallback). */
+  function screenMid() { var rc = $("screen").getBoundingClientRect(); return { x: rc.left + rc.width / 2, y: rc.top + rc.height / 2 }; }
+  function requestLock(auto) {
+    if (PLOCK.on || PLOCK.follow || isTouch() || !deskFree()) return false;
+    PLOCK.auto = !!auto;
+    if (PLOCK.sim) { lockChanged(true); return true; }
+    var cv = $("gl"), r = null;
+    try { r = cv.requestPointerLock(); } catch (e) { lockError(); return false; }
+    // newer browsers also answer with a promise; its refusal is the pointerlockerror below, so it is caught here
+    if (r && typeof r.then === "function") r.then(null, function () {});
+    return true;
+  }
+  // the page gives the mouse back (it locks again later if PLOCK.relock says so)
+  function freeMouse() {
+    if (!PLOCK.on || PLOCK.exiting) return;
+    PLOCK.exiting = true;
+    if (PLOCK.sim) { lockChanged(false); return; }
+    try { document.exitPointerLock(); } catch (e) { PLOCK.exiting = false; }
+  }
+  function relockSoon() {
+    if (!PLOCK.relock || PLOCK.on || PLOCK.follow) return;
+    // after whatever else the click or key is doing (taking up something else, opening a drawer, the explanation)
+    Promise.resolve().then(function () { if (PLOCK.relock && !PLOCK.on && !S.done && deskFree()) requestLock(true); });
+  }
+  function lockChanged(on) {
+    if (on === PLOCK.on) { PLOCK.exiting = false; return; }
+    PLOCK.on = on; MLOOK.down = false; MLOOK.drag = false;
+    // (simulated, the turn is measured from where the pointer was when it locked)
+    PLOCK.lx = on ? MLOOK.px : null; PLOCK.ly = on ? MLOOK.py : null;
+    if (on) {
+      PLOCK.relock = false; PLOCK.auto = false; PLOCK.exiting = false;
+      var c = screenMid(); MLOOK.seen = true; MLOOK.cx = c.x; MLOOK.cy = c.y; MLOOK.over = true; MLOOK.inside = true; MLOOK.onUI = false; MLOOK.push = 0; MLOOK.inBand = 0;
+      placeCursor(c.x, c.y); showCursor(true);
+      if (W3) hoverAt(c.x, c.y);
+    } else {
+      // freed by the page for something that wants a pointer: it locks again after (but not at the end of the case,
+      // where the mouse stays free for its buttons); freed by the player (Esc) or the browser (the window lost focus):
+      // it stays free until the next click on the room
+      var ours = PLOCK.exiting; PLOCK.exiting = false; PLOCK.offAt = perfNow();
+      PLOCK.relock = ours && !S.done;
+      // the system pointer comes back wherever it was; what it is on is found when it next moves
+      MLOOK.over = false; MLOOK.inside = false; MLOOK.px = null; MLOOK.py = null;
+      if (!HELD && VIEW.name === "desk") applyHoverKey(null);
+      showCursor(false);
+    }
+    cursorState(); ui.dirty = true; kick();
+  }
+  function lockError() {
+    var auto = PLOCK.auto; PLOCK.auto = false;
+    if (PLOCK.on) return;
+    // the page's own relock, without a click: no matter, the hint says to click
+    if (auto) { PLOCK.relock = false; ui.dirty = true; kick(); return; }
+    // a click straight after Esc: browsers make you wait a moment before locking again
+    if (perfNow() - PLOCK.offAt < 1600) { toast("CLICK AGAIN TO LOOK AROUND"); return; }
+    lockFallback();
+  }
+  // no pointer lock here: the old free pointer, whose edges turn the head
+  function lockFallback() {
+    if (PLOCK.follow) return;
+    PLOCK.follow = true; PLOCK.relock = false; MLOOK.armed = false;
+    try { document.body.classList.add("mlook"); } catch (e) {}
+    toast("PUSH THE POINTER TO AN EDGE TO TURN");
+    cursorState(); ui.dirty = true; kick();
+  }
+  document.addEventListener("pointerlockchange", function () { if (!PLOCK.sim) lockChanged(!!document.pointerLockElement && document.pointerLockElement === $("gl")); });
+  document.addEventListener("pointerlockerror", function () { if (!PLOCK.sim) lockError(); });
+  // locked: the mouse turns the head (a move too big to be a hand's is a glitch some browsers send as the lock begins)
+  function lockMove(e) {
+    var dx, dy;
+    // simulated (a headless test): the pointer really moves, so the turn is how far it went
+    if (PLOCK.sim) { dx = PLOCK.lx === null ? 0 : e.clientX - PLOCK.lx; dy = PLOCK.ly === null ? 0 : e.clientY - PLOCK.ly; PLOCK.lx = e.clientX; PLOCK.ly = e.clientY; }
+    else { dx = +e.movementX || 0; dy = +e.movementY || 0; }
+    dx = clamp(dx, -SENS.lookMax, SENS.lookMax); dy = clamp(dy, -SENS.lookMax, SENS.lookMax);
+    if ((dx || dy) && lookFree()) addLook(-dx * SENS.look * DEG, -dy * SENS.look * DEG);
+    var c = screenMid(); MLOOK.cx = c.x; MLOOK.cy = c.y; MLOOK.over = true; MLOOK.inside = true; MLOOK.onUI = false;
+    placeCursor(c.x, c.y); if (!CUR.shown) showCursor(true);
+  }
+  document.addEventListener("mousemove", function (e) { if (PLOCK.on) lockMove(e); }, { passive: true });
+  // locked: a left click uses what the dot is on; if that wants a pointer (a thing taken up, a drawer, the terminal)
+  // the mouse is freed at once
+  function lockClick(stamp) {
+    var c = screenMid();
+    hoverAt(c.x, c.y);
+    tapAt(c.x, c.y, "mouse", stamp);
+    lastTap.t = 0; // a click with the dot is never the first half of a double click on what comes up
+    if (!deskFree()) freeMouse();
+    cursorState();
+  }
   function pickKey(p) { return p.type === "thing" ? "thing:" + p.id : p.type === "drawer" ? "drawer:" + p.id : p.type; }
 
   /* ================= input ================= */
@@ -4985,6 +5125,8 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
     if (!center && type === "mouse" && HOVER.key && HOVER.pick && (!pk || pickKey(pk.pick) !== HOVER.key)) pk = { pick: HOVER.pick };
     if (!pk) {
       if (VIEW.name === "drawer") { closeDrawer(); return; }
+      // the mouse free at the desk: a click on nothing locks it, to look round
+      if (type === "mouse" && !PLOCK.on) requestLock(false);
       return;
     }
     var p = pk.pick;
@@ -5010,8 +5152,12 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
     var pts = {}, drag = null;
     function ptsList() { return Object.keys(pts).map(function (k) { return pts[k]; }); }
     function looking() { return VIEW.name === "desk" && !HELD && SIT.done && !REVEAL.on && !ui.picker; }
+    // locked, the mouse's buttons are the dot's: a left click (down and up) uses what it is on
+    var lockDown = null;
     cv.addEventListener("pointerdown", function (e) {
       audio(); ui.touch = e.pointerType === "touch"; ui.kbd = false; if (ui.touch) wakeHud();
+      if (PLOCK.on && e.pointerType === "mouse") { lockDown = e.button; return; }
+      lockDown = null;
       pts[e.pointerId] = { x: e.clientX, y: e.clientY };
       try { cv.setPointerCapture(e.pointerId); } catch (er) {}
       var list = ptsList();
@@ -5027,6 +5173,7 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
       kick();
     });
     cv.addEventListener("pointermove", function (e) {
+      if (PLOCK.on && e.pointerType === "mouse") return;
       if (pts[e.pointerId]) { pts[e.pointerId].x = e.clientX; pts[e.pointerId].y = e.clientY; }
       if (!drag) { if (e.pointerType === "mouse") hoverAt(e.clientX, e.clientY); return; }
       if (drag.lean) { var la = ptsList(); if (la.length >= 2) { LOOK.leanT = clamp(drag.l0 + (Math.hypot(la[0].x - la[1].x, la[0].y - la[1].y) / drag.d0 - 1) * 1.6, 0, 1); kick(); } return; }
@@ -5041,7 +5188,9 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
       }
       var dx = e.clientX - drag.x, dy = e.clientY - drag.y;
       if (!drag.moved && Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) > (e.pointerType === "touch" ? 9 : 5)) drag.moved = true;
-      MLOOK.drag = drag.moved && (!!HELD || looking());
+      // (a mouse drags the room round only in the fallback: with pointer lock it is a plain pointer until it is locked)
+      var dragLooks = looking() && (e.pointerType !== "mouse" || PLOCK.follow);
+      MLOOK.drag = drag.moved && (!!HELD || dragLooks);
       if (drag.moved && HELD && !HELD.th.fly) {
         if (drag.scroll === undefined) drag.scroll = e.pointerType === "touch" && heldLong() && Math.abs(e.clientY - drag.y0) > Math.abs(e.clientX - drag.x0) * 1.2;
         if (drag.scroll) scrollHeld(-dy, true);
@@ -5056,7 +5205,7 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
           }
         }
         ui.dirty = true; kick();
-      } else if (drag.moved && looking() && !viewHeld()) {
+      } else if (drag.moved && dragLooks && !viewHeld()) {
         // drag the room, with a finger or the mouse (either button): the room under the hand moves with it, and a bit
         // more (SENS.drag)
         var vf = baseFov() * DEG, hf = 2 * Math.atan(Math.tan(vf / 2) * ui.W / Math.max(1, ui.H)), kx = SENS.drag * hf / Math.max(1, ui.W), ky = SENS.drag * vf / Math.max(1, ui.H);
@@ -5074,9 +5223,12 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
       if (!d.moved && !cancel && d.button !== 2) tapAt(e.clientX, e.clientY, e.pointerType, e.timeStamp);
       kick();
     }
-    cv.addEventListener("pointerup", function (e) { end(e, false); });
-    cv.addEventListener("pointercancel", function (e) { end(e, true); });
-    cv.addEventListener("pointerleave", function (e) { if (e.pointerType === "mouse" && !drag) { applyHoverKey(null); cursorState(); } });
+    cv.addEventListener("pointerup", function (e) {
+      if (e.pointerType === "mouse" && (PLOCK.on || lockDown !== null)) { var b = lockDown; lockDown = null; if (PLOCK.on && b === 0 && e.button === 0) lockClick(e.timeStamp); kick(); return; }
+      end(e, false);
+    });
+    cv.addEventListener("pointercancel", function (e) { lockDown = null; end(e, true); });
+    cv.addEventListener("pointerleave", function (e) { if (e.pointerType === "mouse" && !drag && !PLOCK.on) { applyHoverKey(null); cursorState(); } });
     cv.addEventListener("contextmenu", function (e) { e.preventDefault(); });
     // the canvas can be made again (see "the GL context"), the screen around it can't: its wheel is bound once
     if (wheelBound) return; wheelBound = true;
@@ -5114,14 +5266,20 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
     // with the graphics given up on, the keys are the RELOAD button's (Enter, Space, Tab)
     if (GLX.failed || (e.target && e.target.id === "glreload")) return;
     var wasKbd = ui.kbd;
-    if ((e.key === "q" || e.key === "Q") && !e.metaKey && !e.ctrlKey && !e.altKey && !(e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA"))) {
+    // Esc with the mouse locked frees it, and does nothing else (the browser frees it itself; some browsers still pass
+    // the key on, and a simulated lock has only this)
+    if (e.key === "Escape" && PLOCK.on) {
+      if (PLOCK.sim) lockChanged(false); else { try { document.exitPointerLock(); } catch (er) {} }
+      e.preventDefault(); return;
+    }
+    if (PLOCK.follow && (e.key === "q" || e.key === "Q") && !e.metaKey && !e.ctrlKey && !e.altKey && !(e.target && (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA"))) {
       if (!HOLDV.q) { HOLDV.q = true; ui.dirty = true; kick(); }
       e.preventDefault(); return;
     }
     if (e.key === "Tab" && !(e.target && e.target.tagName === "TEXTAREA")) {
-      // with the mouse in use and nothing of ours focused by the keyboard, Tab held keeps the view still; tapped, it
+      // in the fallback, with the mouse in use and nothing of ours focused by the keyboard, Tab held keeps the view still; tapped, it
       // starts stepping through the controls as before
-      if (HOLDV.tab || (!e.repeat && MLOOK.seen && !isTouch() && (!wasKbd || !onGlassControl(e.target)))) {
+      if (HOLDV.tab || (!e.repeat && PLOCK.follow && MLOOK.seen && !isTouch() && (!wasKbd || !onGlassControl(e.target)))) {
         if (!HOLDV.tab) { HOLDV.tab = true; HOLDV.tabAt = perfNow(); HOLDV.tabMoved = false; HOLDV.tabShift = e.shiftKey; ui.dirty = true; kick(); }
         e.preventDefault(); return;
       }
@@ -5221,6 +5379,8 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
   function frame(now) {
     raf = 0; FRAMEN++;
     if (document.hidden) return;
+    // something came up that wants a pointer (a thing in hand, a drawer, the terminal, the explanation): the lock goes
+    if (PLOCK.on && !deskFree()) freeMouse();
     if (lastT) perfStep(now - lastT, now);
     var dt = lastT ? Math.min(.1, (now - lastT) / 1000) : .016; lastT = now;
     if (ui.view === "loading") {
@@ -5247,7 +5407,7 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
       stepRoomLife(dt, t); stepRoom(t);
       // what is under the mouse changes as the head turns under it
       if (MLOOK.recheck && MLOOK.over && (FRAMEN & 1)) { MLOOK.recheck = false; hoverAt(MLOOK.cx, MLOOK.cy); cursorState(); }
-      else if (FRAMEN % 12 === 0 && MLOOK.seen && MLOOK.px !== null) {
+      else if (FRAMEN % 12 === 0 && MLOOK.seen && MLOOK.px !== null && !PLOCK.on) {
         if (MLOOK.inside) pointerOver(document.elementFromPoint(MLOOK.px, MLOOK.py));
         cursorState();
       }
@@ -5436,7 +5596,7 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
   function glNote(text, fatal) {
     var box = $("glnote"); if (!box) return;
     $("glmsg").textContent = text; box.className = fatal ? "" : "soft"; box.hidden = false; $("glreload").hidden = !fatal;
-    if (fatal) { showCursor(false); try { $("glreload").focus({ preventScroll: true }); } catch (e) {} }
+    if (fatal) { freeMouse(); showCursor(false); try { $("glreload").focus({ preventScroll: true }); } catch (e) {} }
   }
   function glNoteHide() { var box = $("glnote"); if (box && !GLX.failed) box.hidden = true; }
   $("glreload").addEventListener("click", function () { location.reload(); });
@@ -5484,12 +5644,34 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
     lean: function (on) { LOOK.leanT = on ? 1 : 0; LOOK.lean = LOOK.leanT; kick(); return LOOK.lean; },
     camQuat: function () { return W3.camera.quaternion.toArray().map(function (v) { return +v.toFixed(4); }); },
     camPos: function () { return W3.camera.position.toArray().map(function (v) { return +v.toFixed(3); }); },
-    // the mouse: "follow" while it can turn the head (by an edge or a drag), "held" while something is in your hand, a
-    // drawer or the terminal is up, "touch" on a touch screen, "none" before the mouse has moved
-    mode: function () { return isTouch() ? "touch" : !MLOOK.seen ? "none" : mouseLooks() ? "follow" : "held"; },
-    // the edges: { band, bandY, yaw, pitch (degrees a second at the very edge), curve, intent (s), smooth, drag, swipe,
-    // pad (px of give round what the pointer is on) };
-    // set any of them to tune it live, e.g. window.__desk.sens.yaw = 180
+    // the mouse: "lock" while it is locked and turns the head, "free" while it is a plain pointer at the desk (a click
+    // on the room locks it), "follow" in the fallback with no pointer lock (its edges turn the head), "held" while
+    // something is in your hand, a drawer or the terminal is up (any of them, locked or not), "touch" on a touch
+    // screen, "none" before the mouse has moved
+    mode: function () { return isTouch() ? "touch" : PLOCK.on ? (lookFree() ? "lock" : "held") : !MLOOK.seen ? "none" : !lookFree() ? "held" : PLOCK.follow ? "follow" : "free"; },
+    // pointer lock now: { on, follow (the fallback), relock (it locks again back at the desk), sim, mid (where the dot is) }
+    pointer: function () { var c = screenMid(); return { on: PLOCK.on, follow: PLOCK.follow, relock: PLOCK.relock, sim: PLOCK.sim, mid: { x: Math.round(c.x), y: Math.round(c.y) } }; },
+    /* headless browsers can't lock the pointer, so tests stand in for the browser: simulateLock(true) locks it as a
+       click on the room would (only where it could be: seated at the desk with nothing up), false frees it as Esc
+       would, "error" refuses a lock as a browser might (the page falls back to the edges), and null gives the real
+       browser back (and leaves the fallback). While simulated, every lock and unlock the page asks for (a click on
+       the room, a thing taken up and put back) is granted at once, and the turn is read from how far the pointer
+       really moves */
+    simulateLock: function (on) {
+      if (on === null) { if (PLOCK.on) lockChanged(false); PLOCK.sim = false; PLOCK.follow = !CAN_LOCK; PLOCK.relock = false; if (CAN_LOCK) { try { document.body.classList.remove("mlook"); } catch (e) {} } cursorState(); ui.dirty = true; kick(); return this.mode(); }
+      PLOCK.sim = true;
+      if (on === "error") { if (PLOCK.on) lockChanged(false); PLOCK.auto = false; PLOCK.offAt = -1e9; lockError(); }
+      else if (on) requestLock(false);
+      else if (PLOCK.on) lockChanged(false);
+      return this.mode();
+    },
+    // what in the room is at a point on the screen (a key like "thing:_card", "drawer:a", "board"), or null
+    pickAt: function (cx, cy) { if (!W3) return null; W3.ray.setFromCamera(toPicture(cx, cy), W3.camera); var p = pickFirst(); return p ? pickKey(p.pick) : null; },
+    // the hint at the foot of the glass at the desk now ("" if none)
+    deskHint: function () { return VIEW.name === "desk" && !HELD && SIT.done ? deskHint() : ""; },
+    // the turning: { look (degrees for each px the locked mouse moves), lookMax, smooth } and, for the fallback's edges,
+    // { band, bandY, yaw, pitch (degrees a second at the very edge), curve, intent (s), drag, swipe }, and pad (px of
+    // give round what the pointer is on); set any of them to tune it live, e.g. window.__desk.sens.look = .4
     sens: SENS,
     // what the pointer is doing to the head right now: the turn it asks for (degrees a second) and how far in it is
     push: function () { var p = edgePush(); return { yaw: p ? deg(p.yaw) : 0, pitch: p ? deg(p.pitch) : 0, k: +MLOOK.push.toFixed(2), inside: MLOOK.inside, zone: MLOOK.px !== null && inZone(MLOOK.cx, MLOOK.cy) }; },
@@ -5510,7 +5692,7 @@ body.mlook #gl, body.mlook #hits > * { cursor: none !important; }
     },
     // the people's ID photographs on one sheet (a data URL), to look at the faces
     faces: function () { var ppl = FILE_LIST.filter(function (f) { return f.kind === "person"; }), c = canvas(ppl.length * 320 + 20, 400), x = plainLetters(c.getContext("2d")); x.fillStyle = "#222"; x.fillRect(0, 0, c.width, c.height); ppl.forEach(function (f, i) { portrait(x, f, 20 + i * 320, 20, 300, 360); }); return c.toDataURL("image/png"); },
-    cursor: function () { var el = curEls(); return { shown: CUR.shown, cls: CUR.cls, label: CUR.label, over: MLOOK.over, onUI: MLOOK.onUI, transform: el ? el.style.transform : "" }; },
+    cursor: function () { var el = curEls(); return { shown: CUR.shown, cls: CUR.cls, sys: !!el && /\bsys\b/.test(el.className), label: CUR.label, over: MLOOK.over, onUI: MLOOK.onUI, transform: el ? el.style.transform : "" }; },
     hover: function () { return HOVER.key ? hoverLabel(HOVER.key) : null; },
     // the debrief at the door: { stage, on, i, n, who, text, look }
     debrief: function () { var l = DEB.lines[DEB.i]; return { stage: DEB.stage, on: DEB.on, i: DEB.i, n: DEB.lines.length, who: l ? l.who : null, text: l ? l.text : null, look: l ? l.look || null : null, played: DEB.played, saved: !!S.debriefed }; },
