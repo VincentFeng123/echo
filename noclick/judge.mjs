@@ -59,7 +59,56 @@ export async function judgeStep({ a, b, aDesc = '', bDesc = '', mode = 'medium' 
   return answer;
 }
 
+// The reader: which English Wikipedia article a player most likely means by words that aren't a page's name, from the
+// page they're on (never the target). The app's src/lib/games/no-clicking/judge.ts readGuess, for the local server.
+const READ_SYSTEM = `You help a word-association game played with English Wikipedia pages. The player is on page A and typed some words meaning the next page. Say which English Wikipedia article they most likely mean, by its exact title as it is on English Wikipedia. Typing mistakes, nicknames, plurals and other languages' names mean the article they point to. A description means the article it describes; when it could mean several, prefer the one most closely tied to page A, but never page A itself: the player is looking for the next page. If the words don't point to any article other than A, answer an empty title. Never explain. Answer in JSON: title.`;
+const readCache = new Map();
+export async function readGuess({ at, atDesc = '', text }, ip = '') {
+  const clip = (s, n) => String(s || '').replace(/\s+/g, ' ').trim().slice(0, n);
+  at = clip(at, 160); atDesc = clip(atDesc, 160); text = clip(text, 120);
+  if (!at || !text) return { error: 'missing words', status: 400 };
+  const key = JSON.stringify([at, atDesc, text.toLowerCase()]);
+  if (readCache.has(key)) return { title: readCache.get(key) };
+  const now = Date.now(), times = (recent.get(ip) || []).filter(t => now - t < 60000);
+  if (times.length >= 40) return { error: 'slow down', status: 429 };
+  times.push(now); recent.set(ip, times);
+  const apiKey = setting('OPENAI_API_KEY');
+  if (!apiKey) return { off: true };
+  const model = setting('WHITE_RABBIT_OPENAI_MODEL') || 'gpt-6-luna';
+  const ask = effort => fetch('https://api.openai.com/v1/responses', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: 'Bearer ' + apiKey },
+    body: JSON.stringify({
+      model, instructions: READ_SYSTEM, input: `A: ${at}${atDesc ? ' (' + atDesc + ')' : ''}\nTyped: ${text}`, max_output_tokens: 200, reasoning: { effort },
+      text: { format: { type: 'json_schema', name: 'reading', strict: true, schema: { type: 'object', additionalProperties: false, required: ['title'], properties: { title: { type: 'string' } } } } },
+    }),
+    signal: AbortSignal.timeout(10000),
+  });
+  let r = await ask('none');
+  if (r.status === 400) r = await ask('low');
+  if (!r.ok) return { error: 'model ' + r.status, status: 502 };
+  const j = await r.json();
+  let out;
+  try { out = JSON.parse((j.output || []).flatMap(o => o.content || []).find(c => c.type === 'output_text')?.text); } catch { return { error: 'no answer', status: 502 }; }
+  const title = clip(out.title, 255).replace(/^["'“”]+|["'“”.]+$/g, '');
+  readCache.set(key, title);
+  return { title };
+}
+
 // Node http glue shared by serve.mjs and api/judge.js
+async function handlePost(req, res, work) {
+  if (req.method !== 'POST') { res.writeHead(405, { 'content-type': 'application/json' }); res.end('{"error":"POST"}'); return; }
+  let body = '';
+  for await (const chunk of req) { body += chunk; if (body.length > 4000) break; }
+  let q = {};
+  try { q = JSON.parse(body || '{}'); } catch {}
+  const ip = String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || '').split(',')[0].trim();
+  let out;
+  try { out = await work(q, ip); } catch (e) { out = { error: String(e.message || e), status: 502 }; }
+  res.writeHead(out.status || 200, { 'content-type': 'application/json', 'cache-control': 'no-store' });
+  res.end(JSON.stringify(out));
+}
+export function handleRead(req, res) { return handlePost(req, res, readGuess); }
 export async function handleJudge(req, res) {
   if (req.method !== 'POST') { res.writeHead(405, { 'content-type': 'application/json' }); res.end('{"error":"POST"}'); return; }
   let body = '';

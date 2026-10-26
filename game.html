@@ -55,6 +55,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   var SHARE_URL = "__SHARE_URL__"; if (SHARE_URL === "auto") SHARE_URL = location.origin + location.pathname;
   var NAME = "No Clicking";
   var WR_API = "__API__", ARCHIVE_HREF = "__ARCHIVE_HREF__"; // where the referee and leaderboard answer, and the desk game's page (page.mjs, or the app's /games route)
+  var HOME_HREF = "__HOME__"; // where ◀ WHITE RABBIT goes when the game wasn't opened from a page of the site: White Rabbit's home
   var ARCHIVE = "__ARCHIVE__" === "on"; // the ARCHIVE tab shows only where the desk game is served (page.mjs decides)
   var EJECT = 5; // strokes over par before the tape ejects and plays the rabbit's route (set by the mode)
   // three ways to play the same tapes; the player picks, and each mode keeps its own progress and leaderboard
@@ -145,7 +146,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   // a typed description that isn't a page: the search hit that connects to where you are (links it, or is linked
   // from it), else one that carries all its words, else one that carries its first word; otherwise it's not found
   function pickHit(m, cur) {
-    var guessed = function (t) { return resolve(t).then(function (p) { var o = {}; Object.keys(p).forEach(function (k) { o[k] = p[k]; }); o.searched = true; return o; }); };
+    var guessed = function (t) { return resolve(t).then(marked); };
     var hits = m.hits.filter(function (t) { return t !== cur.title; }).slice(0, 8);
     var near = hits.length ? wiki({ prop: "links", titles: [cur.title].concat(hits).join("|"), pltitles: [cur.title].concat(hits).join("|"), pllimit: "max" }) : Promise.resolve(null);
     return near.then(function (j) {
@@ -153,6 +154,48 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       ((j && j.query && j.query.pages) || []).forEach(function (p) { (p.links || []).forEach(function (l) { if (p.title === cur.title) linked[l.title] = 1; else if (l.title === cur.title) linked[p.title] = 1; }); });
       var hit = hits.filter(function (t) { return linked[t]; })[0] || m.all || m.first;
       return hit ? guessed(hit) : { kind: "dym", none: true, opts: m.suggest };
+    });
+  }
+  // a page the game only guessed from what was typed: if it doesn't connect, the guess may be ours, so it's free
+  function marked(p) { var o = {}; Object.keys(p).forEach(function (k) { o[k] = p[k]; }); o.searched = true; return o; }
+  // The reader (WR_API + "/read", the AI): which English Wikipedia page the player most likely means by words that
+  // aren't a page's name, from the page they're on (never the target). Resolves to a title, or "" when it can't say
+  // or there's no reader here.
+  var READ_OFF = false;
+  function aiRead(text, cur) {
+    var k = "r:" + cur.title + "|" + norm(text);
+    if (PAGES[k] !== undefined) return Promise.resolve(PAGES[k]);
+    if (READ_OFF) return Promise.resolve("");
+    if (ui.busy && !ui.busy.quiet) { ui.busy.read = true; ui.dirty = true; kick(); }
+    return fetch(WR_API + "/read", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ at: cur.title, atDesc: cur.desc || "", text: text }) })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) {
+        if (j && j.off) READ_OFF = true;
+        var t = j && typeof j.title === "string" ? j.title.trim() : "";
+        if (j && !j.off && !j.error) PAGES[k] = t;
+        return t;
+      }, function () { return ""; });
+  }
+  // what the player meant by words that aren't a page's name: the reader's page when it's a real one (one with several
+  // senses still takes the sense that connects), else Wikipedia's search read with the page you're on in mind
+  function meant(b, cur, raw) {
+    return aiRead(raw, cur).then(function (t) {
+      if (!t || norm(t) === norm(cur.title)) return pickHit(b, cur);
+      return resolve(t).then(function (p) {
+        if (p.missing || p.title === cur.title) return pickHit(b, cur);
+        if (p.dab) return pickSense(p, cur, t).then(function (q) { return q.kind ? pickHit(b, cur) : marked(q); });
+        return marked(p);
+      }, function () { return pickHit(b, cur); });
+    });
+  }
+  // a name with several senses none of which connects: the reader may know which one was meant
+  function senseOrRead(b, cur, raw) {
+    return pickSense(b, cur, raw).then(function (p) {
+      if (!p.kind) return p;
+      return aiRead(raw, cur).then(function (t) {
+        if (!t || norm(t) === norm(b.title) || norm(t) === norm(cur.title)) return p;
+        return resolve(t).then(function (q) { return q.missing || q.dab || q.title === cur.title ? p : marked(q); }, function () { return p; });
+      });
     });
   }
   function textOf(t) {
@@ -248,7 +291,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     return Promise.all([curPage(st), resolve(raw)]).then(function (r) {
       var a = r[0], b = r[1];
       // a page we can't find never costs a stroke
-      return (b.missing ? pickHit(b, a) : b.dab ? pickSense(b, a, raw) : Promise.resolve(b)).then(function (p) {
+      return (b.missing ? meant(b, a, raw) : b.dab ? senseOrRead(b, a, raw) : Promise.resolve(b)).then(function (p) {
         if (p.missing) return { kind: "dym", opts: [], none: true };
         if (p.kind) return p;
         if (p.title === cur) return { free: "You're on " + cur + " already. Type something connected to it." };
@@ -645,6 +688,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       "You're in " + MODES[MODE].name.charAt(0) + MODES[MODE].name.slice(1).toLowerCase() + " mode. Switch modes on the shelf; each keeps its own progress and leaderboard.",
       MODE === "hard" ? "• A step counts only when one Wikipedia page links the other: no names, no referee." : "• A step counts when its Wikipedia page and the one you're on link or name each other, or when the referee sees a " + (MODE === "easy" ? "clear connection: nutmeg → nuts → squirrel → animal." : "clear, specific connection: nutmeg → nuts → squirrel → acorn."),
       "• Each step is a stroke. Par is " + R.par + ", the steps the real rabbit hole took. Fewer strokes beats the rabbit.",
+      "• Don't know a page's exact name? Describe it, like “german snack”. The AI works out which page you mean, and a wrong guess costs nothing.",
       (MODE === "easy" ? "• Big topics like music, film or a country are fine here; only years, dates and lists are too broad." : "• Be specific: umbrella topics like music, film, food or a country are too broad and don't count" + (MODE === "hard" ? ", and in Hard mode they cost a stroke." : " (free, but no help).")) + " A guess that connects nothing is static and costs a stroke. Names Wikipedia doesn't know are free.",
       MODE === "hard" ? "• Run out of strokes at par + 3 and the disk ejects." : "• The last step into " + tg + " has to be a real Wikipedia link or name; the referee's associations don't count for it.",
       "• Stuck? HINT (+1 stroke) names a page that leads toward " + tg + ". UNDO steps back a page for free.",
@@ -700,17 +744,14 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   function drawShelf() {
     var W = ui.W, H = ui.H, narrow = W < 760, mx = W * (narrow ? .1 : .09), my = H * (narrow ? .07 : .09) + ui.safeT;
     var ty = my + 22, fs = narrow ? 20 : 23;
-    if (!narrow) {
-      X.fillStyle = COL.osd; X.fillRect(mx, ty - 13, 11, 11); T("WHITE RABBIT", mx + 18, ty, { size: fs });
-      drawLogo(W / 2, ty + 8, true);
-    } else {
-      drawLogo(W / 2, ty + 6, false);
-      ty += 52;
-      X.fillStyle = COL.osd; X.fillRect(mx, ty - 12, 10, 10); T("WHITE RABBIT", mx + 16, ty, { size: fs });
-    }
+    if (!narrow) drawLogo(W / 2, ty + 8, true);
+    else { drawLogo(W / 2, ty + 6, false); ty += 52; }
+    // back to where the player was on White Rabbit before opening the game
+    var hw = T("◀ WHITE RABBIT", mx, ty, { size: fs });
+    hit("home", mx - 6, ty - fs, hw + 12, fs + 12, "button", { label: "Back to White Rabbit", onClick: goBack });
     // the two games are tabs on the same TV: No Clicking is this page, Archive (the research desk) lives at /desk
     var tab1 = "NO CLICKING", ts = fs, cw1, cw2;
-    for (; ts > 15; ts--) { cw1 = W_(tab1, ts, FF.vcr); cw2 = ARCHIVE ? W_("ARCHIVE", ts, FF.vcr) : 0; if (!narrow || W_("WHITE RABBIT", fs, FF.vcr) + 16 + 22 + cw1 + 16 + cw2 <= W - mx * 2) break; }
+    for (; ts > 15; ts--) { cw1 = W_(tab1, ts, FF.vcr); cw2 = ARCHIVE ? W_("ARCHIVE", ts, FF.vcr) : 0; if (!narrow || W_("◀ WHITE RABBIT", fs, FF.vcr) + 22 + cw1 + 16 + cw2 <= W - mx * 2) break; }
     var c2 = W - mx - cw2, c1 = ARCHIVE ? c2 - (narrow ? 16 : 34) - cw1 : W - mx - cw1;
     T(tab1, c1, ty, { size: ts, color: COL.white, glow: 6 }); X.fillStyle = COL.white; X.fillRect(c1, ty + 5, cw1, 2);
     if (ARCHIVE) { T("ARCHIVE", c2, ty, { size: ts, color: COL.faint, glow: 0 }); hit("tab-archive", c2 - 6, ty - ts, cw2 + 12, ts + 12, "button", { label: "Switch to Archive", onClick: toArchive }); }
@@ -898,7 +939,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       // checking with Wikipedia: the box tunes in
       var by0 = y, bh = 86;
       X.strokeStyle = COL.line; X.lineWidth = 1.5; X.strokeRect(x + .75, by0 + .75, w - 1.5, bh);
-      font(22, FF.vcr); var bt = ui.busy.track ? "FINDING A HINT…" : (ui.busy.ai ? "ASKING THE REFEREE: “" : "TUNING IN “") + String(ui.busy.g).toUpperCase() + "”";
+      font(22, FF.vcr); var bt = ui.busy.track ? "FINDING A HINT…" : (ui.busy.ai ? "ASKING THE REFEREE: “" : ui.busy.read ? "READING “" : "TUNING IN “") + String(ui.busy.g).toUpperCase() + "”";
       while (X.measureText(bt).width > w - 32 && bt.length > 12) bt = bt.slice(0, -3) + "”";
       T(bt, x + 16, by0 + 34, { size: 22, color: COL.white });
       var n = Math.floor((w - 32) / 6), ph0 = Math.floor(Date.now() / 90);
@@ -1574,7 +1615,14 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     ui.view = "shelf"; if (GL) GL.show(true); setFocus(RI); flash();
     try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
   }
-  function toArchive() { flash(); setTimeout(function () { location.href = ARCHIVE_HREF; }, reduce ? 0 : 160); }
+  // the two games are one stop in the browser's history: switching tabs replaces the page, so going back leaves both
+  function toArchive() { flash(); setTimeout(function () { location.replace(ARCHIVE_HREF); }, reduce ? 0 : 160); }
+  // ◀ WHITE RABBIT: back to the page of the site the game was opened from, else the site's home
+  function goBack() {
+    var from = ""; try { from = document.referrer ? new URL(document.referrer).origin : ""; } catch (e) {}
+    flash();
+    setTimeout(function () { if (from === location.origin && history.length > 1) history.back(); else location.href = HOME_HREF; }, reduce ? 0 : 160);
+  }
   function toggleBW() { ui.bw = !ui.bw; ui.dirty = true; kick(); }
   function submitGuess() {
     var el = hitEls.guess, val = (el ? el.value : ui.input).trim(); if (!val || ui.busy || ST.done) return;

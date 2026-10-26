@@ -152,6 +152,22 @@ async function run(name, vp, mobile, browser, errors) {
   if ((await state()).some(t => t.strokes)) errors.push(`${name}: Medium mode didn't keep its own (empty) progress`);
   await shot('11-modes');
 
+  // ◀ WHITE RABBIT goes back to the site's page the game was opened from (here the game's own page, which opens it
+  // again at another address), and to White Rabbit's home when it was opened from nowhere (the app's "/", this repo's whiterabbt.com)
+  const openedAt = page.url();
+  await page.evaluate(u => { location.href = u; }, URL0 + '?from=test'); await waitView('shelf');
+  await btn('Back to White Rabbit').click({ force: true });
+  await page.waitForURL(u => u.href === openedAt, { timeout: 15000, waitUntil: 'commit' }).catch(() => errors.push(`${name}: ◀ WHITE RABBIT didn't go back to ${openedAt} (at ${page.url()})`));
+  const home = /\/games\/?$/.test(new URL(URL0).pathname) ? new URL('/', URL0).href : 'https://www.whiterabbt.com/';
+  const fresh = await ctx.newPage();
+  await fresh.route(u => u.href === home, r => r.fulfill({ contentType: 'text/html', body: 'home' }));
+  await fresh.goto(URL0); await fresh.waitForFunction(() => window.__noclick && window.__noclick.view() === 'shelf', null, { timeout: 60000 });
+  await fresh.locator('#hits [aria-label="Close how to play"]:not([hidden])').first().click({ force: true }).catch(() => {});
+  await fresh.locator('#hits [aria-label="Back to White Rabbit"]:not([hidden])').first().click({ force: true });
+  await fresh.waitForURL(u => u.href === home, { timeout: 15000, waitUntil: 'commit' }).catch(() => errors.push(`${name}: ◀ WHITE RABBIT opened from nowhere didn't go to ${home} (at ${fresh.url()})`));
+  await fresh.close();
+  await page.goto(URL0); await waitView('shelf');
+
   // the ARCHIVE tab switches to /desk (where the desk game is served; elsewhere the tab hides itself)
   await page.waitForTimeout(800);
   if (!(await btn('Switch to Archive').isVisible().catch(() => false))) { console.log(`${name}: no ARCHIVE tab here (desk.html absent), skipped`); await ctx.close(); return; }
