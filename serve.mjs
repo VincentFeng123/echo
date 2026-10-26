@@ -7,6 +7,7 @@ import os from 'node:os';
 import { buildPage, buildDesk } from './page.mjs';
 import { handleJudge, handleRead } from './noclick/judge.mjs';
 import { handleBoard } from './noclick/board.mjs';
+import { handleDuel, handleRanks } from './noclick/duel-local.mjs';
 const PORT = Number(process.env.PORT || 4747);
 http.createServer((req, res) => {
   if (req.url === '/' || req.url.startsWith('/?') || req.url.startsWith('/#') || req.url === '/index.html') {
@@ -25,6 +26,9 @@ http.createServer((req, res) => {
   if (req.url === '/api/read') { handleRead(req, res).catch(e => { res.writeHead(500); res.end(String(e)); }); return; }
   // and its daily leaderboard
   if (req.url === '/api/board' || req.url.startsWith('/api/board?')) { handleBoard(req, res).catch(e => { res.writeHead(500); res.end(String(e)); }); return; }
+  // 1v1 races and their boards, in this process's memory (the app keeps them in its database)
+  if (req.url === '/api/duel' || req.url.startsWith('/api/duel?')) { handleDuel(req, res).catch(e => { res.writeHead(500); res.end(String(e)); }); return; }
+  if (req.url.startsWith('/api/ranks')) { handleRanks(req, res); return; }
   res.writeHead(404, { 'content-type': 'text/plain' }); res.end('not found');
 }).listen(PORT, '0.0.0.0', () => {
   const lan = Object.values(os.networkInterfaces()).flat().filter(a => a && a.family === 'IPv4' && !a.internal).map(a => a.address);

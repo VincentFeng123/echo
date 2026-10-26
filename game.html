@@ -75,7 +75,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   function norm(s) { return String(s).normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/&/g, " and ").replace(/[’'`´ʻ]/g, "").replace(/[^a-z0-9]+/g, " ").trim().replace(/^(the|a|an) /, ""); }
   function baseTitle(t) { return String(t).replace(/\s*\([^)]*\)\s*$/, ""); }
   function load() { try { var v = JSON.parse(localStorage.getItem(STORE) || "null"); return v && Array.isArray(v.path) ? v : null; } catch (e) { return null; } }
-  function save(st) { try { localStorage.setItem(STORE, JSON.stringify(st)); } catch (e) {} }
+  function save(st) { if (!STORE) return; try { localStorage.setItem(STORE, JSON.stringify(st)); } catch (e) {} }
   function flash() { if (reduce) return; var s = $("screen"); s.classList.remove("flash"); void s.offsetWidth; s.classList.add("flash"); }
   function title(t) { return t || ""; }
   function here(st) { return st.path[st.path.length - 1]; }
@@ -786,9 +786,11 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     var line = fst.done ? (fst.solved ? "IN " + fst.strokes + " · PAR " + r.par + " · " + golf(score(fst, r)) : "EJECTED · " + golf(score(fst, r))) : (t.start + " → " + t.target).toUpperCase() + " · PAR " + r.par;
     font(cs, FF.vcr); if (X.measureText(line).width > W - mx * 2) line = fst.done ? line : "PAR " + r.par + " · MAKE YOUR OWN TRAIL";
     T(line, W / 2, cy + cs * 1.2, { size: cs, color: COL.white, align: "center" });
-    var label = fst.done ? "SEE DISK ▶" : fst.log.length ? "RESUME ▶" : "PLAY ▶";
-    var bwid = W_(label, 24, FF.vcr) + 44;
-    button("play", label, W / 2 - bwid / 2, cy + cs * 1.2 + 16, bwid, 44, { primary: !fst.done, onClick: insertTape, label: "Play disk " + (t.ri + 1) + ": " + t.start + " to " + t.target });
+    var label = fst.done ? "SEE DISK ▶" : fst.log.length ? "RESUME ▶" : "PLAY ▶", dl = "1V1 RACE ▶";
+    var bwid = W_(label, 24, FF.vcr) + 44, dwid = W_(dl, 24, FF.vcr) + 44, bx0 = W / 2 - (bwid + 12 + dwid) / 2;
+    button("play", label, bx0, cy + cs * 1.2 + 16, bwid, 44, { primary: !fst.done, onClick: insertTape, label: "Play disk " + (t.ri + 1) + ": " + t.start + " to " + t.target });
+    // a live race against someone else, on a disk from an earlier day
+    button("duel", dl, bx0 + bwid + 12, cy + cs * 1.2 + 16, dwid, 44, { onClick: openDuel, label: "1v1: race someone else, live" });
     if (!ui.gl) drawFlatTape();
   }
   function drawLoading() {
@@ -811,8 +813,9 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
   function drawPlay() {
     var W = ui.W, H = ui.H, narrow = W < 760, mx = W * (narrow ? .09 : .085), my = H * (narrow ? .065 : .08) + ui.safeT;
     var hy = my + 18, hs = narrow ? 21 : 24;
-    var bw = T("◀ DISKS", mx, hy, { size: hs }); hit("back", mx - 6, hy - hs, bw + 12, hs + 10, "button", { label: "Back to the disks", onClick: backToShelf });
-    if (!narrow) T("DISK " + (RI + 1) + " OF " + ROUNDS.length + " · " + rules().name + " MODE", W / 2, hy, { size: hs, color: COL.white, align: "center", terms: true, fixed: true });
+    var duel = inDuel(), bl = duel ? leaveLabel() : "◀ DISKS";
+    var bw = T(bl, mx, hy, { size: hs }); hit("back", mx - 6, hy - hs, bw + 12, hs + 10, "button", { label: duel ? (bl === "◀ DISKS" ? "Back to the disks" : "Leave the race") : "Back to the disks", onClick: duel ? leaveDuel : backToShelf });
+    if (!narrow) T(duel ? "1V1 · VS " + String((DUEL.state && DUEL.state.them && DUEL.state.them.name) || "").toUpperCase() : "DISK " + (RI + 1) + " OF " + ROUNDS.length + " · " + rules().name + " MODE", W / 2, hy, { size: hs, color: COL.white, align: "center", terms: !duel, fixed: true });
     var ct = ST.done ? (ST.solved ? "IN " + ST.strokes + " · " + golfName(score(ST, R)) : "EJECTED") : "STROKES " + ST.strokes + " · PAR " + R.par;
     var cw = W_(ct, hs, FF.vcr); T(ct, W - mx - cw, hy, { size: hs, terms: true, fixed: true });
     var bottom = H - my * .6 - ui.safeB;
@@ -849,7 +852,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     ui.cols = { split: divX }; ui.clip = [splitTop, bottom];
   }
   function drawHead(x, y, w, narrow) {
-    var ks = narrow ? 17 : 18, chip = narrow ? "DISK " + (RI + 1) + " OF " + ROUNDS.length + " · " + rules().name : "FROM THE LIBRARY", chipW = W_(chip, ks, FF.vcr) + 14;
+    var ks = narrow ? 17 : 18, chip = inDuel() ? "1V1 RACE" : narrow ? "DISK " + (RI + 1) + " OF " + ROUNDS.length + " · " + rules().name : "FROM THE LIBRARY", chipW = W_(chip, ks, FF.vcr) + 14;
     X.strokeStyle = COL.rose; X.lineWidth = 1.5; X.strokeRect(x + .75, y + .75, chipW - 1.5, ks + 8);
     T(chip, x + 7, y + ks + 2, { size: ks, color: COL.rose });
     var hl = "? HOW TO PLAY", hw = W_(hl, ks, FF.vcr);
@@ -859,7 +862,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     var hsz = narrow ? Math.max(30, Math.min(42, ui.W * .09)) : Math.max(36, Math.min(54, ui.W * .04));
     y += para(title(R.start) + "  →  " + title(R.target), x, y - hsz * .18, w, { size: hsz, fam: FF.serif, color: COL.white, lh: hsz * 1.02, glow: 5, terms: true, fixed: true }) + 2;
     var dts = dayTotals();
-    var sub = "PAR " + R.par + " · " + (ST.done ? "THE DISK PLAYED OUT" : "THE RABBIT TOOK " + R.par + ". MAKE YOUR OWN TRAIL.") + (dts.done && !ST.done ? " · TODAY " + golf(dts.score) + " SO FAR" : "");
+    var sub = inDuel() ? duelLine() : "PAR " + R.par + " · " + (ST.done ? "THE DISK PLAYED OUT" : "THE RABBIT TOOK " + R.par + ". MAKE YOUR OWN TRAIL.") + (dts.done && !ST.done ? " · TODAY " + golf(dts.score) + " SO FAR" : "");
     y += para(sub, x, y, w, { size: narrow ? 17 : 18, fam: FF.vcr, color: COL.dim, lh: 21, terms: true, fixed: true });
     return y;
   }
@@ -912,7 +915,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     T("PAR", sx + R.par * (s + gap) - gap / 2 - W_("PAR", 14, FF.vcr) / 2, y + s + 16, { size: 14, color: COL.faint, glow: 0, terms: true });
   }
   function drawGuessCol(x, y, w, narrow) {
-    if (ST.done) return drawEnd(x, y - 6, w, narrow) + 18;
+    if (ST.done) return (inDuel() ? drawDuelEnd(x, y - 6, w, narrow) : drawEnd(x, y - 6, w, narrow)) + 18;
     var cur = here(ST);
     var lx = x; lx += lamp(lx, y + 10, linksTarget(cur), "END"); lamp(lx, y + 10, onHole(cur), "RABBIT");
     pips(x, y + 2, w);
@@ -1212,6 +1215,16 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       return y;
     }
     function board(x, y, w) {
+      // three boards: today's scores on the daily disks, and 1v1 by rating and by wins this week
+      var tabs = [["today", "TODAY"], ["rating", "1V1 RATING"], ["week", "1V1 THIS WEEK"]], tx = x, ts = narrow ? 16 : 18, tbh = ts + 16;
+      tabs.forEach(function (tb) {
+        var tw = W_(tb[1], ts, FF.vcr) + 24;
+        if (tx > x && tx + tw > x + w) { tx = x; y += tbh + 8; }
+        button("rank-" + tb[0], tb[1], tx, y, tw, tbh, { primary: RANKS.tab === tb[0], size: ts, onClick: function () { pickRanks(tb[0]); }, label: tb[1].toLowerCase() + " leaderboard" + (RANKS.tab === tb[0] ? ", shown" : "") });
+        tx += tw + 8;
+      });
+      y += tbh + 18;
+      if (RANKS.tab !== "today") return drawRanks(x, y, w, RANKS.tab, narrow);
       y = drawSection("LEADERBOARD · " + rules().name + " · TODAY", x, y, w);
       return drawBoard(x, y, w, narrow);
     }
@@ -1243,11 +1256,256 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     if (ui.scrollR > ui.maxR) { ui.scrollR = ui.maxR; ui.dirty = true; }
     ui.cols = { split: divX }; ui.clip = [splitTop, bottom];
   }
-  function openScores() {
+  function openScores(tab) {
+    if (typeof tab === "string") RANKS.tab = tab;
     ui.view = "scores"; ui.scroll = 0; ui.scrollL = 0; ui.scrollR = 0; ui.copied = ""; ui.tip = null; ui.modal = null; ui.editName = false; ui.nameText = undefined;
     if (GL) GL.show(false);
-    fetchBoard(); flash(); ui.dirty = true; kick();
+    fetchBoard(); if (RANKS.tab !== "today") fetchRanks(RANKS.tab); flash(); ui.dirty = true; kick();
     try { history.replaceState(null, "", "#today"); } catch (e) {}
+  }
+  /* ================= 1v1 ================= */
+  // A live race against whoever else is looking (the app's /api/games/no-clicking/duel, its 0072 migration): the same
+  // disk for both, Medium rules, 6 minutes; fewer strokes wins, the same strokes goes to whoever got there first. The
+  // server matches, settles and rates; this page waits in the queue (asking every 2 seconds keeps its place), then
+  // reports each step and asks how the other side is doing every 1.5 seconds.
+  var QUEUE = null, DUEL = null;
+  // the leaderboards: today's daily scores (BOARD), the 1v1 rating, and 1v1 wins this week
+  var RANKS = { tab: "today", rating: { state: "idle", entries: [] }, week: { state: "idle", entries: [] } };
+  function redraw() { ui.dirty = true; kick(); }
+  function post(path, body, keep) {
+    return fetch(WR_API + path, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), keepalive: !!keep })
+      .then(function (r) { return r.json().then(function (j) { return { ok: r.ok, j: j || {} }; }, function () { return { ok: false, j: r.status === 404 ? { setup: true } : {} }; }); });
+  }
+  // the days this browser played, so it doesn't race on a disk it knows
+  function playedDays() {
+    var out = [];
+    try { Object.keys(localStorage).forEach(function (k) { var m = /^white-rabbit-no-clicking-day-(\d{4}-\d{2}-\d{2})-/.exec(k); if (m && out.indexOf(m[1]) < 0) out.push(m[1]); }); } catch (e) {}
+    return out;
+  }
+  function inDuel() { return !!(DUEL && DUEL.round && R === DUEL.round); }
+  function mmss(ms) { var s = Math.max(0, Math.ceil(ms / 1000)); return Math.floor(s / 60) + ":" + pad2(s % 60); }
+  function openDuel() {
+    if (DUEL) return;
+    if (QUEUE) clearTimeout(QUEUE.timer);
+    ui.view = "duel"; ui.scroll = 0; ui.tip = null; ui.modal = null; ui.duelName = undefined; ui.copied = "";
+    QUEUE = { state: savedName().length >= 2 ? "waiting" : "name", since: Date.now(), racing: 0, err: "", nodisk: false, timer: 0, asking: false };
+    if (GL) GL.show(false);
+    flash(); redraw();
+    try { history.replaceState(null, "", "#duel"); } catch (e) {}
+    if (QUEUE.state === "waiting") joinQueue();
+  }
+  function joinQueue() {
+    var q = QUEUE; if (!q || q.asking) return;
+    clearTimeout(q.timer);
+    var name = (ui.duelName !== undefined ? ui.duelName : savedName()).trim();
+    if (name.length < 2) { q.state = "name"; q.err = "Type a name of 2 to 16 letters first."; return redraw(); }
+    if (q.state !== "waiting") { q.state = "waiting"; q.since = Date.now(); q.err = ""; }
+    q.asking = true; redraw();
+    post("/duel", { action: "join", device: deviceId(), name: name, played: playedDays() }).then(function (x) {
+      q.asking = false;
+      if (QUEUE !== q) return;
+      if (x.j.setup) { q.state = "setup"; return redraw(); }
+      if (!x.ok) { q.state = "name"; q.err = x.j.error || "Couldn't join. Try again."; return redraw(); }
+      try { localStorage.setItem("white-rabbit-no-clicking-name", name); } catch (e) {}
+      ui.duelName = undefined;
+      if (x.j.state === "matched") { QUEUE = null; return startDuel(x.j.duel); }
+      q.racing = x.j.racing || 0; q.nodisk = !!x.j.nodisk; q.err = "";
+      q.timer = setTimeout(joinQueue, 2000); redraw();
+    }, function () {
+      q.asking = false;
+      if (QUEUE !== q) return;
+      q.err = "NO SIGNAL. STILL TRYING."; q.timer = setTimeout(joinQueue, 3000); redraw();
+    });
+  }
+  function cancelQueue() {
+    var q = QUEUE; QUEUE = null;
+    if (q) { clearTimeout(q.timer); if (q.state === "waiting") post("/duel", { action: "leave", device: deviceId() }, true).catch(function () {}); }
+    backToShelf();
+  }
+  function copyDuelLink() {
+    var link = location.origin + location.pathname + "#duel";
+    var shown = function () { ui.copied = link; redraw(); };
+    try { navigator.clipboard.writeText(link).then(function () { ui.copied = "LINK COPIED. SEND IT TO A FRIEND."; redraw(); }, shown); } catch (e) { shown(); }
+  }
+  function startDuel(id) {
+    DUEL = { id: id, state: null, offset: 0, round: null, st: null, over: false, sending: false, again: false, timer: 0, mode: MODE, leaveAt: 0 };
+    ui.view = "duel"; ui.copied = ""; redraw();
+    pollDuel();
+  }
+  function serverNow() { return Date.now() + (DUEL ? DUEL.offset : 0); }
+  function pollDuel() {
+    var d = DUEL; if (!d) return;
+    clearTimeout(d.timer);
+    fetch(WR_API + "/duel?duel=" + encodeURIComponent(d.id) + "&device=" + encodeURIComponent(deviceId()), { cache: "no-store" })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (j) { if (DUEL === d && j && j.now) takeDuel(j); }, function () {})
+      .then(function () { if (DUEL === d && !d.over) d.timer = setTimeout(pollDuel, 1500); });
+  }
+  // the race as the server sees it: it starts when the disk comes, and ends when it's settled
+  function takeDuel(j) {
+    var d = DUEL;
+    d.state = j; d.offset = Date.parse(j.now) - Date.now();
+    if (j.disk && !d.round) enterRace(j);
+    if (j.finished && !d.over) {
+      d.over = true; clearTimeout(d.timer);
+      if (d.st && !d.st.done) { d.st.done = true; if (!d.st.solved) d.st.ejected = true; if (inDuel()) finished(); }
+      try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+    }
+    redraw();
+  }
+  function enterRace(j) {
+    var d = DUEL, disk = j.disk, me = j.me || {};
+    // both sides play Medium rules, whatever this browser plays the daily disks in
+    MODE = "medium"; EJECT = rules().eject;
+    Object.keys(disk.about || {}).forEach(function (t) { if (!ABOUT[t]) ABOUT[t] = disk.about[t]; });
+    d.round = { slug: "1v1", start: disk.start, target: disk.target, par: disk.par, hole: disk.hole, near: disk.near || [], level: "1V1", ink: "", lamp: {} };
+    R = d.round; STORE = ""; ST = d.st = fresh();
+    // a reloaded page carries on from where the server says it was
+    if (Array.isArray(me.path) && me.path.length > 1 && me.path[0] === R.start) ST.path = me.path.slice();
+    if (me.strokes > 0) ST.strokes = me.strokes;
+    if (me.done) { ST.done = true; ST.solved = !!me.solved; ST.ejected = !me.solved; }
+    ui.view = "play"; ui.scroll = 0; ui.scrollL = 0; ui.scrollR = 0; ui.free = ""; ui.copied = ""; ui.input = ""; ui.busy = null; ui.tip = null; ui.modal = null;
+    ui.playAt = ST.done ? Date.now() : 0;
+    if (hitEls.guess) hitEls.guess.value = "";
+    resolve(R.start).catch(function () {}); resolve(R.target).catch(function () {});
+    if (!ST.done) lampCheck(here(ST));
+    flash();
+  }
+  // this side's progress after every step (the newest only, one at a time), or that it's leaving
+  function sendDuel(left) {
+    var d = DUEL; if (!d || d.over || (!left && !d.st)) return;
+    if (d.sending && !left) { d.again = true; return; }
+    d.sending = true;
+    var body = left ? { action: "move", duel: d.id, device: deviceId(), left: true } : { action: "move", duel: d.id, device: deviceId(), path: d.st.path.slice(), strokes: d.st.strokes, solved: d.st.solved };
+    post("/duel", body, left).then(function (x) { if (DUEL === d && x.j && x.j.now) takeDuel(x.j); }, function () {}).then(function () {
+      d.sending = false;
+      if (DUEL === d && d.again) { d.again = false; sendDuel(false); }
+    });
+  }
+  // ◀ LEAVE: during a race it gives the race away, so it asks twice
+  function leaveDuel() {
+    var d = DUEL; if (!d) return backToShelf();
+    if (!d.over && !(d.st && d.st.done)) {
+      if (Date.now() - d.leaveAt > 3000) { d.leaveAt = Date.now(); return redraw(); }
+      sendDuel(true);
+    }
+    exitDuel();
+  }
+  function leaveLabel() { return DUEL && !DUEL.over && !(DUEL.st && DUEL.st.done) ? (Date.now() - DUEL.leaveAt < 3000 ? "LEAVE? TAP AGAIN" : "◀ LEAVE") : "◀ DISKS"; }
+  function exitDuel(then) {
+    var d = DUEL; if (!d) return;
+    clearTimeout(d.timer); DUEL = null;
+    MODE = d.mode; EJECT = rules().eject; useRound(focus);
+    try { history.replaceState(null, "", location.pathname + location.search); } catch (e) {}
+    (then || backToShelf)();
+  }
+  function duelAgain() { exitDuel(openDuel); }
+  function duelBoards() { exitDuel(function () { openScores("rating"); }); }
+  // the line under the race's title: how the other side is doing, and the clock
+  function duelLine() {
+    var s = DUEL.state, th = s && s.them; if (!th) return "PAR " + R.par;
+    var who = String(th.name || "THEM").toUpperCase();
+    var theirs = th.left ? who + " LEFT" : th.done ? (th.solved ? who + " FINISHED IN " + th.strokes : who + " IS OUT") : who + ": STROKE " + th.strokes + " · " + th.moves + (th.moves === 1 ? " MOVE" : " MOVES");
+    return "PAR " + R.par + " · " + theirs + (DUEL.over ? "" : " · " + mmss(Date.parse(s.ends_at) - serverNow()) + " LEFT");
+  }
+  // the queue, and the countdown once matched
+  function drawDuelWait() {
+    var W = ui.W, H = ui.H, narrow = W < 760, mx = W * (narrow ? .09 : .085), my = H * (narrow ? .065 : .08) + ui.safeT;
+    var hy = my + 18, hs = narrow ? 21 : 24;
+    var bl = DUEL ? leaveLabel() : "◀ DISKS", bw = T(bl, mx, hy, { size: hs });
+    hit("back", mx - 6, hy - hs, bw + 12, hs + 10, "button", { label: DUEL ? "Leave the race" : "Back to the disks", onClick: DUEL ? leaveDuel : cancelQueue });
+    var w = Math.min(660, W - mx * 2), x = (W - w) / 2, y = hy + (narrow ? 64 : 92);
+    T("1V1 RACE", W / 2, y, { size: narrow ? 46 : 64, color: "#fff", align: "center", glow: 6 }); y += 26;
+    y += para("Race someone on the same disk, live. Fewer strokes wins. The same strokes? Whoever got there first. 6 minutes, Medium rules. Leaving loses.", x, y, w, { size: 16, fam: FF.mono, pre: "500", color: COL.dim, lh: 23 }) + 22;
+    if (DUEL) {
+      var s = DUEL.state;
+      if (!s || !s.me) { T("MATCHED. TUNING IN…", W / 2, y + 30, { size: 26, color: COL.osd, align: "center" }); return; }
+      var vs = (s.me.name + " (" + s.me.rating + ")   VS   " + s.them.name + " (" + s.them.rating + ")").toUpperCase(), vsz = narrow ? 22 : 28;
+      font(vsz, FF.vcr); while (X.measureText(vs).width > w && vsz > 15) { vsz--; font(vsz, FF.vcr); }
+      T(vs, W / 2, y + vsz, { size: vsz, color: COL.ink, align: "center", glow: 4 }); y += vsz + 46;
+      var left = Date.parse(s.starts_at) - serverNow();
+      T(left > 0 ? "STARTS IN " + Math.ceil(left / 1000) : "STARTING…", W / 2, y + 20, { size: narrow ? 38 : 48, color: "#fff", align: "center", glow: 6 });
+      return;
+    }
+    var q = QUEUE || { state: "name", err: "" };
+    if (q.state === "setup") { para("1v1 isn't switched on here yet.", x, y, w, { size: 18, fam: FF.mono, pre: "500", color: COL.dim, lh: 24 }); return; }
+    if (q.state === "name") {
+      T("YOUR NAME", x, y + 15, { size: 16, color: COL.faint, glow: 0 }); y += 22;
+      var val = ui.duelName !== undefined ? ui.duelName : savedName(), bW = Math.min(260, w * .46), fW = w - bW - 8, fh = 50;
+      X.fillStyle = "rgba(0,0,0,.5)"; X.fillRect(x, y, fW, fh);
+      X.strokeStyle = ui.duelNameFocus ? COL.ink : COL.line; X.lineWidth = ui.duelNameFocus ? 2 : 1.5; X.strokeRect(x + .75, y + .75, fW - 1.5, fh - 1.5);
+      if (val) T(val, x + 14, y + 32, { size: 20, fam: FF.mono, color: "#fff" }); else T("2–16 LETTERS", x + 14, y + 33, { size: 20, color: COL.faint, glow: 0 });
+      if (ui.duelNameFocus) { X.fillStyle = COL.ink; X.fillRect(x + 14 + (val ? W_(val, 20, FF.mono) + 2 : 0), y + 15, 9, 20); }
+      hit("duel-name", x, y, fW, fh, "input", { label: "Your name in 1v1", maxLength: 16, value: val, focusKey: "duelNameFocus", onText: function (v) { ui.duelName = v; if (QUEUE) QUEUE.err = ""; }, onSubmit: joinQueue });
+      button("duel-find", narrow ? "FIND ▶" : "FIND AN OPPONENT ▶", x + w - bW, y, bW, fh, { primary: true, size: 21, onClick: joinQueue, label: "Find an opponent" });
+      y += fh + 10;
+      if (q.err) para(q.err, x, y, w, { size: 15, fam: FF.mono, pre: "500", color: COL.c, lh: 21 });
+      return;
+    }
+    var waited = Date.now() - q.since, secs = Math.floor(waited / 1000);
+    T("LOOKING FOR AN OPPONENT…", W / 2, y + 20, { size: narrow ? 22 : 28, color: "#fff", align: "center", glow: 4 }); y += 36;
+    T(Math.floor(secs / 60) + ":" + pad2(secs % 60), W / 2, y + 24, { size: 26, color: COL.ink, align: "center" }); y += 40;
+    var n = Math.floor(w / 6), ph0 = Math.floor(Date.now() / 90);
+    for (var k = 0; k < n; k++) { var on = ((k * 7 + ph0 * 3) % 11) < 4; X.fillStyle = on ? "rgba(225,222,214,.75)" : "rgba(225,222,214,.15)"; X.fillRect(x + k * 6, y, 2, 18); }
+    y += 36;
+    if (q.racing) { T(q.racing + (q.racing === 1 ? " PLAYER IS" : " PLAYERS ARE") + " RACING RIGHT NOW", W / 2, y + 16, { size: 18, color: COL.osd, align: "center", glow: 0 }); y += 30; }
+    if (q.nodisk) y += para("There are no disks to race on yet. Come back tomorrow.", x, y, w, { size: 16, fam: FF.mono, pre: "500", color: COL.c, lh: 22 }) + 8;
+    if (waited > 8000) y += para("Few people are on right now. Send this link to a friend: you'll race each other as soon as they open it.", x, y, w, { size: 16, fam: FF.mono, pre: "500", color: COL.dim, lh: 22 }) + 12;
+    var half = (w - 10) / 2;
+    button("duel-link", "COPY LINK", x, y, half, 46, { size: 21, primary: waited > 8000, onClick: copyDuelLink, label: "Copy a link to race a friend" });
+    button("duel-cancel", "CANCEL", x + half + 10, y, half, 46, { size: 21, onClick: cancelQueue, label: "Stop looking" }); y += 56;
+    if (ui.copied) { y += para(ui.copied, x, y, w, { size: 17, fam: FF.vcr, color: COL.found, lh: 20 }) + 4; }
+    if (q.err) para(q.err, x, y, w, { size: 15, fam: FF.vcr, color: COL.c, lh: 20 });
+  }
+  // the end of a race: waiting for the other side, then who won and how the rating moved
+  function drawDuelEnd(x, y, w, narrow) {
+    var d = DUEL, s = d.state || {}, me = s.me || {}, th = s.them || {}, y0 = y, tn = String(th.name || "THEM").toUpperCase(); y += 22;
+    var big = !d.over ? (ST.solved ? "IN " + ST.strokes + " · WAITING" : "OUT · WAITING") : s.result === "win" ? "YOU WIN" : s.result === "loss" ? "YOU LOSE" : "A DRAW";
+    var col = !d.over ? "#fff" : s.result === "win" ? COL.found : s.result === "loss" ? COL.c : COL.ink;
+    T(big, x + 18, y + 32, { size: 44, color: col, glow: 4 }); y += 50;
+    var mine = me.left ? "YOU LEFT" : ST.solved ? "YOU: " + ST.strokes + " STROKES" : "YOU: NOT SOLVED";
+    var theirs = th.left ? tn + " LEFT" : th.done ? (th.solved ? tn + ": " + th.strokes + " STROKES" : tn + ": NOT SOLVED") : tn + " IS ON STROKE " + (th.strokes || 0);
+    y += para(mine + " · " + theirs, x + 18, y, w - 36, { size: 19, fam: FF.vcr, color: COL.dim, lh: 22 }) + 6;
+    if (!d.over) y += para("It ends when " + (th.name || "they") + " finishes, can't beat you any more, or the clock runs out (" + mmss(Date.parse(s.ends_at) - serverNow()) + ").", x + 18, y, w - 36, { size: 15, fam: FF.mono, pre: "500", color: COL.dim, lh: 21 }) + 8;
+    if (d.over && me.rating_after !== null && me.rating_after !== undefined) {
+      var dr = me.rating_after - me.rating;
+      y += para("RATING " + me.rating + " → " + me.rating_after + " (" + (dr >= 0 ? "+" : "−") + Math.abs(dr) + ")", x + 18, y + 2, w - 36, { size: 24, fam: FF.vcr, color: COL.ink, lh: 26, glow: 4 }) + 10;
+    }
+    if (d.over && Array.isArray(th.path) && th.path.length) y += para(tn + "'S ROUTE: " + th.path.join(" → "), x + 18, y + 2, w - 36, { size: 15, fam: FF.mono, pre: "500", color: COL.osd, lh: 21, maxLines: 6 }) + 10;
+    if (d.over) { button("duel-again", "1V1 AGAIN ▶", x + 18, y, w - 36, 50, { primary: true, onClick: duelAgain, label: "Race someone else" }); y += 60; }
+    var half = (w - 36 - 10) / 2;
+    button("duel-boards", "LEADERBOARDS", x + 18, y, half, 44, { size: 20, onClick: duelBoards, label: "Leaderboards" });
+    button("duel-out", "◀ DISKS", x + 18 + half + 10, y, half, 44, { size: 20, onClick: function () { exitDuel(); }, label: "Back to the disks" }); y += 52;
+    button("hole", narrow ? "OPEN THIS RABBIT HOLE ↗" : "OPEN THIS RABBIT HOLE ON WHITERABBT.COM ↗", x + 18, y, w - 36, 46, { href: R.hole.url, label: "Open this rabbit hole on White Rabbit" }); y += 56;
+    X.strokeStyle = COL.line; X.lineWidth = 1.5; X.strokeRect(x + .75, y0 + .75, w - 1.5, y - y0 - 1.5);
+    if (ST.log.length && !narrow) y = drawLogList(ST.log.slice().reverse(), x, y + 18, w, "YOUR GUESSES");
+    return y;
+  }
+  function pickRanks(tab) { RANKS.tab = tab; if (tab !== "today") fetchRanks(tab); else fetchBoard(); ui.scrollR = 0; flash(); redraw(); }
+  function fetchRanks(tab) {
+    var b = RANKS[tab]; b.state = "loading"; redraw();
+    fetch(WR_API + "/ranks?board=" + tab + "&device=" + encodeURIComponent(deviceId()), { cache: "no-store" })
+      .then(function (r) { if (!r.ok && r.status !== 404) throw new Error(r.status); return r.ok ? r.json() : { setup: true }; })
+      .then(function (j) { if (j.setup) b.state = "setup"; else { b.entries = j.entries || []; b.state = "ok"; } redraw(); }, function () { b.state = "error"; redraw(); });
+  }
+  // a 1v1 board: by rating, or wins this week
+  function drawRanks(x, y, w, tab, narrow) {
+    var b = RANKS[tab];
+    y = drawSection(tab === "rating" ? "1V1 · RATING, ALL TIME" : "1V1 · WINS THIS WEEK", x, y, w);
+    if (b.state === "loading" || b.state === "idle") return y + para("TUNING IN THE LEADERBOARD…", x, y, w, { size: 19, fam: FF.vcr, color: COL.dim, lh: 22 });
+    if (b.state === "setup") return y + para("1v1 isn't switched on here yet.", x, y, w, { size: 16, fam: FF.mono, pre: "500", color: COL.dim, lh: 23 });
+    if (b.state === "error") { y += para("NO SIGNAL: the leaderboard didn't answer.", x, y, w, { size: 17, fam: FF.vcr, color: COL.dim, lh: 21 }) + 8; button("ranks-retry", "TRY AGAIN", x, y, Math.min(w, 200), 42, { size: 20, onClick: function () { fetchRanks(tab); }, label: "Load the leaderboard again" }); return y + 52; }
+    if (!b.entries.length) y += para(tab === "rating" ? "Nobody has raced yet. Be the first." : "No 1v1 wins yet this week. Be the first.", x, y, w, { size: 16, fam: FF.mono, pre: "500", color: COL.dim, lh: 23 }) + 10;
+    else {
+      var rows = b.entries.slice(0, 25).map(function (e) {
+        var hl = e.mine ? "rgba(230,220,174,.14)" : "", c = e.mine ? COL.ink : COL.osd, nm = e.name + (e.mine ? " (YOU)" : "");
+        return tab === "rating" ? { hl: hl, color: c, cells: [String(e.rank), nm, String(e.rating), e.wins + "–" + e.losses + "–" + e.draws] } : { hl: hl, color: c, cells: [String(e.rank), nm, String(e.wins), String(e.played)] };
+      });
+      y = drawTable(x, y, w, tab === "rating" ? [{ label: "#", f: .12, align: "center" }, { label: "PLAYER", f: .44 }, { label: "RATING", f: .2, align: "center" }, { label: "W–L–D", f: .24, align: "center" }]
+        : [{ label: "#", f: .12, align: "center" }, { label: "PLAYER", f: .48 }, { label: "WINS", f: .2, align: "center" }, { label: "RACES", f: .2, align: "center" }], rows, { size: 17 }) + 8;
+    }
+    button("ranks-race", "1V1 RACE ▶", x, y, Math.min(w, 260), 46, { primary: true, size: 21, onClick: openDuel, label: "Race someone" });
+    return y + 56;
   }
   function drawUI() {
     var cv = ui.cv;
@@ -1256,7 +1514,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     X.setTransform(ui.pr, 0, 0, ui.pr, 0, 0);
     if (!ui.gl) { var g = X.createRadialGradient(ui.W / 2, ui.H * .45, 10, ui.W / 2, ui.H * .45, ui.W * .8); g.addColorStop(0, "#2b2b2d"); g.addColorStop(1, "#0c0c0d"); X.fillStyle = g; X.fillRect(0, 0, ui.W, ui.H); }
     ui.hits = []; ui.termN = 0; ui.pageTerms = pageTerms();
-    if (ui.view === "loading") drawLoading(); else if (ui.view === "shelf") drawShelf(); else if (ui.view === "scores") drawScores(); else { drawPlay(); if (ui.modal) drawModal(); }
+    if (ui.view === "loading") drawLoading(); else if (ui.view === "shelf") drawShelf(); else if (ui.view === "scores") drawScores(); else if (ui.view === "duel") drawDuelWait(); else { drawPlay(); if (ui.modal) drawModal(); }
     if (ui.view === "play" || ui.view === "scores") drawTip();
   }
 
@@ -1534,9 +1792,9 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       if (ui.loadDone && !ui.doneAt) { ui.doneAt = tnow; ui.loadFrom = early; }
       ui.load = ui.doneAt ? Math.min(100, ui.loadFrom + (100 - ui.loadFrom) * Math.min(1, (tnow - ui.doneAt) / (reduce ? 1 : 450))) : early;
       ui.dirty = true;
-      if (ui.load >= 100 && tnow - ui.doneAt > (reduce ? 0 : 520)) { ui.view = "shelf"; if (GL) GL.show(true); flash(); if (location.hash === "#today") openScores(); var hm = /^#tape-(\d+)$/.exec(location.hash); if (hm && +hm[1] >= 1 && +hm[1] <= ROUNDS.length) { focus = +hm[1] - 1; if (GL) GL.focus(focus); openRound(+hm[1] - 1); } }
+      if (ui.load >= 100 && tnow - ui.doneAt > (reduce ? 0 : 520)) { ui.view = "shelf"; if (GL) GL.show(true); flash(); if (location.hash === "#today") openScores(); if (location.hash === "#duel") openDuel(); var hm = /^#tape-(\d+)$/.exec(location.hash); if (hm && +hm[1] >= 1 && +hm[1] <= ROUNDS.length) { focus = +hm[1] - 1; if (GL) GL.focus(focus); openRound(+hm[1] - 1); } }
     }
-    var anim = playing() || !!ui.busy;
+    var anim = playing() || !!ui.busy || (ui.view === "duel" && !reduce);
     if (anim) ui.dirty = true;
     if (ui.dirty) { ui.dirty = false; drawUI(); ui.texDirty = true; syncHits(); }
     var busy = false;
@@ -1585,6 +1843,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     if (!res) return false;
     if (res.free) { ui.free = res.free; $("live").textContent = res.free; ui.dirty = true; kick(); return false; }
     save(ST); ui.free = "";
+    if (inDuel()) sendDuel(false);
     $("live").textContent = kindName(res) + ". " + replyLine(res);
     if (ST.done) finished();
     ui.dirty = true; kick();
@@ -1606,6 +1865,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     ui.busy = { track: true, t0: Date.now() }; ui.free = ""; ui.dirty = true; kick();
     track(st).then(function (r) {
       ui.busy = null;
+      if (st.done) { ui.dirty = true; kick(); return; }
       st.tracked[cur] = r; st.strokes++; st.log.push(r); checkEject(st);
       after(r);
     }, noSignal);
@@ -1643,6 +1903,8 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
       });
     }).then(function (res) {
       ui.busy = null;
+      // a race that ended while this was being checked keeps its result
+      if (st.done) { ui.dirty = true; kick(); return; }
       if (res.free) return after(res);
       clear();
       var r = record(res, val, st);
@@ -1719,7 +1981,7 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     if (e.key === "ArrowLeft") { setFocus(focus - 1); e.preventDefault(); }
     if (e.key === "Enter" && document.activeElement === document.body) insertTape();
   });
-  setInterval(function () { if (ui.view === "shelf" && !reduce) { ui.dirty = true; kick(); } }, 1000);
+  setInterval(function () { if ((ui.view === "shelf" && !reduce) || DUEL || QUEUE) { ui.dirty = true; kick(); } }, 1000);
   window.addEventListener("resize", resize);
 
   /* ================= go ================= */
@@ -1738,6 +2000,9 @@ body { margin: 0; background: var(--room); color: var(--osd); font-family: var(-
     ui.loadDone = true; ui.dirty = true; kick();
   });
   // read-only peek for tests: where each tape stands
-  window.__noclick = { tapes: function () { return STATES.map(function (st, i) { var r = ROUNDS[i]; return { slug: r.slug, par: r.par, strokes: st.strokes, path: st.path.slice(), done: st.done, solved: st.solved, ejected: st.ejected, log: st.log.map(function (x) { return x.kind; }), lastTo: st.log.length ? st.log[st.log.length - 1].to || "" : "" }; }); }, view: function () { return ui.view; }, board: function () { return { state: BOARD.state, entries: BOARD.entries.map(function (e) { return { rank: e.rank, name: e.name, score: e.score, mine: e.mine }; }), err: BOARD.err }; }, busy: function () { return !!ui.busy; }, free: function () { return ui.free; } };
+  window.__noclick = { tapes: function () { return STATES.map(function (st, i) { var r = ROUNDS[i]; return { slug: r.slug, par: r.par, strokes: st.strokes, path: st.path.slice(), done: st.done, solved: st.solved, ejected: st.ejected, log: st.log.map(function (x) { return x.kind; }), lastTo: st.log.length ? st.log[st.log.length - 1].to || "" : "" }; }); }, view: function () { return ui.view; }, board: function () { return { state: BOARD.state, entries: BOARD.entries.map(function (e) { return { rank: e.rank, name: e.name, score: e.score, mine: e.mine }; }), err: BOARD.err }; }, busy: function () { return !!ui.busy; }, free: function () { return ui.free; },
+    duel: function () { return DUEL ? { id: DUEL.id, over: DUEL.over, result: DUEL.state && DUEL.state.result, started: !!DUEL.round, start: DUEL.round ? DUEL.round.start : "", target: DUEL.round ? DUEL.round.target : "", route: DUEL.round ? DUEL.round.hole.route.map(function (h) { return h.t; }) : [], strokes: DUEL.st ? DUEL.st.strokes : 0, path: DUEL.st ? DUEL.st.path.slice() : [], done: !!(DUEL.st && DUEL.st.done), them: DUEL.state && DUEL.state.them } : null; },
+    queue: function () { return QUEUE ? { state: QUEUE.state, err: QUEUE.err, nodisk: QUEUE.nodisk } : null; },
+    ranks: function () { return { tab: RANKS.tab, rating: RANKS.rating.state, week: RANKS.week.state, entries: (RANKS[RANKS.tab] || { entries: [] }).entries || [] }; } };
 })();
 </script>

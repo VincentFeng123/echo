@@ -38,7 +38,7 @@ async function run(name, vp, mobile, browser, errors) {
   const expect = async (ri, g, kind) => {
     const before = (await state())[ri].log.length; await type(g);
     const s = (await state())[ri], k = s.log.length > before ? s.log[s.log.length - 1] : 'free';
-    if (k !== kind) errors.push(`${name}: "${g}" gave ${k}, expected ${kind}` + (k === 'free' ? ` (${await page.evaluate(() => window.__noclick.free())})` : ''));
+    if (!(Array.isArray(kind) ? kind.indexOf(k) >= 0 : k === kind)) errors.push(`${name}: "${g}" gave ${k}, expected ${kind}` + (k === 'free' ? ` (${await page.evaluate(() => window.__noclick.free())})` : ''));
   };
 
   await page.goto(URL0 + '?reset', { timeout: 120000 });
@@ -59,7 +59,8 @@ async function run(name, vp, mobile, browser, errors) {
   if (await xBtn.isVisible()) errors.push(`${name}: the X didn't close how to play`);
   await shot('2c-tape1-start'); await overflow('tape 1 start');
   await expect(0, CHECKS[0].broad, 'broad');
-  await expect(0, 'Mercury', 'dym');
+  // a name with many senses, none connecting: WHICH ONE?, or (when the AI reader picks the planet) TOO BROAD; free either way
+  await expect(0, 'Mercury', ['dym', 'broad']);
   await expect(0, 'Zqxjv wkqp', 'dym'); // no such page: free
   await btn('Hint').click({ force: true }); await settle();
   if (await last(0) !== 'track') errors.push(`${name}: HINT didn't take`);
