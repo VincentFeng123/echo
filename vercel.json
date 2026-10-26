@@ -4,6 +4,7 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "redirects": [
+    { "source": "/", "destination": "https://www.whiterabbt.com/games", "permanent": false },
     { "source": "/desk", "destination": "https://www.whiterabbt.com/games/archive", "permanent": false },
     { "source": "/desk/:path*", "destination": "https://www.whiterabbt.com/games/archive", "permanent": false },
     { "source": "/:path*", "destination": "https://www.whiterabbt.com/games", "permanent": false }
